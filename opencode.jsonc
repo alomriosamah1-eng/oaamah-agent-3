@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "project": "osamah-agent",
+  "instructions": [
+    "This is the 'Osamah agent' project: an Expo SDK 54 React Native mobile app, dark futuristic glassmorphism UI, Arabic-first with AR/EN toggle.",
+    "The chat backend is THIS opencode server. The app talks to it over HTTP and is fully automatic (no keys, no manual connection fields in the UI).",
+    "Routes: app/(auth)/(tabs) -> index (Home dashboard), chat (chat screen, /chat/:id opens a saved chat), saved (المحفوظات history list), settings (control / knowledge / profile / chat / appearance / about). ChatPage lives in components/ChatPage.tsx.",
+    "utils/Opencode.ts is the single client for this server: auto-discovers it (opencode.local via mDNS, then localhost, then Android emulator 10.0.2.2), GET /api/model lists the real models, POST /session creates a session, POST /session/:id/message sends the user prompt (model picked from the Control Center is sent here).",
+    "Data is stored locally via expo-sqlite (chats + messages) and AsyncStorage (settings). No Clerk, no accounts, no purchases.",
+    "Do NOT add new dependencies that are not already installed in node_modules.",
+    "Do not remove the /(auth) route group segment names — routes like /(auth)/(tabs)/chat must stay stable."
+  ]
+}

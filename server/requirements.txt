@@ -1,0 +1,7 @@
+# Osamah Agent — voice gateway (Python 3.10+)
+# Install:  pip install -r requirements.txt
+# Run:      ./server/run.sh        (or python3 server/voice_gateway.py)
+edge-tts>=6.1.12
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
