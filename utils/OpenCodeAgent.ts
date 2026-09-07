@@ -56,7 +56,7 @@ async function serverChat(
   sessionKey: string,
   timeoutMs: number,
   signal?: AbortSignal,
-  onDelta?: (delta: string) => void,
+  onDelta?: (fullSoFar: string) => void,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

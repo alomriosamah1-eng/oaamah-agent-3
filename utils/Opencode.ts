@@ -250,8 +250,10 @@ export const sendMessage = async (
 
 // Stream an assistant reply as it is written. The message POST resolves only
 // when the reply is complete, while `GET /event` (SSE) carries incremental
-// `message.part.updated` frames whose `part.text` grows until completion —
-// we emit only the new tail through onDelta so the UI types out live.
+// `message.part.updated` frames whose assistant `text` part grows until
+// completion. We emit the FULL assistant text on every growth (set-semantics,
+// so UIs that replace their bubble content stream correctly) and never surface
+// the user-message echo or the English `reasoning`/`step-*` working parts.
 export const streamMessage = async (
   sessionId: string,
   text: string,
@@ -261,7 +263,8 @@ export const streamMessage = async (
   const ctrl = new AbortController();
   opts.signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
 
-  let last = '';
+  let assistantID: string | null = null;
+  let shown = '';
   let streamError: unknown = null;
 
   const eventRes = await expoFetch(`${base}/event`, {
@@ -293,12 +296,23 @@ export const streamMessage = async (
           }
           const props = event?.properties;
           if (props?.sessionID !== sessionId) continue;
-          if (event.type === 'message.part.updated') {
+          if (event.type === 'message.updated') {
+            if (props?.info?.role === 'assistant' && !assistantID) {
+              assistantID = props.info.id;
+            }
+          } else if (event.type === 'message.part.updated') {
             const part = props?.part;
-            if (part?.type === 'text' && typeof part.text === 'string' && part.text.length > last.length) {
-              const delta = part.text.slice(last.length);
-              last = part.text;
-              opts.onDelta?.(delta);
+            // Only the assistant's growing text part is shown; the user echo,
+            // reasoning and step bookkeeping are debug-noise for the UI.
+            if (
+              assistantID &&
+              part?.messageID === assistantID &&
+              part?.type === 'text' &&
+              typeof part.text === 'string' &&
+              part.text.length > shown.length
+            ) {
+              shown = part.text;
+              opts.onDelta?.(shown);
             }
           } else if (event.type === 'session.error') {
             streamError = props?.error ?? 'opencode session error';
@@ -326,8 +340,10 @@ export const streamMessage = async (
       .join('\n');
     const reply = textParts.trim();
     if (!reply) throw new Error('empty opencode server reply');
-    const delta = reply.length > last.length ? reply.slice(last.length) : '';
-    if (delta) opts.onDelta?.(delta);
+    if (reply.length > shown.length) {
+      shown = reply;
+      opts.onDelta?.(shown);
+    }
     return reply;
   } finally {
     ctrl.abort();
