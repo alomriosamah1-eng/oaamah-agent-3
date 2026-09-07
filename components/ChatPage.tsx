@@ -56,6 +56,37 @@ const ChatPage = () => {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // Fast typewriter for server replies: text starts appearing the moment it
+  // arrives and keeps flowing as new frames stream in.
+  const streamTextRef = useRef('');
+  const revealedRef = useRef(0);
+  const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopTicker = () => {
+    if (tickerRef.current) {
+      clearInterval(tickerRef.current);
+      tickerRef.current = null;
+    }
+  };
+
+  const feedDelta = (fullSoFar: string) => {
+    streamTextRef.current = fullSoFar;
+    if (revealedRef.current >= fullSoFar.length) return;
+    if (!tickerRef.current) {
+      tickerRef.current = setInterval(() => {
+        revealedRef.current = Math.min(streamTextRef.current.length, revealedRef.current + 120);
+        patchLastBot(streamTextRef.current.slice(0, revealedRef.current));
+        if (revealedRef.current >= streamTextRef.current.length) stopTicker();
+      }, 24);
+    }
+  };
+
+  const resetTicker = () => {
+    stopTicker();
+    streamTextRef.current = '';
+    revealedRef.current = 0;
+  };
+
   // Profile context — loaded once, rebuilt on return to chat
   const [profileContext, setProfileContext] = useState('');
   useEffect(() => {
@@ -75,6 +106,7 @@ const ChatPage = () => {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      stopTicker();
     };
   }, []);
 
@@ -122,6 +154,7 @@ const ChatPage = () => {
   // ------------------------------------------------------------------
 
   const runSimpleChat = async (text: string, directive: string, abort: AbortController) => {
+    resetTicker();
     const history = messagesRef.current.filter((m) => m.content && m.content.trim() !== '');
     const effectivePrompt = directive ? `${directive}\n\n${text}` : text;
     const prompt = buildHistoryPrompt(history, effectivePrompt);
@@ -134,12 +167,14 @@ const ChatPage = () => {
         user: prompt,
         chain: model ? [model] : undefined,
         sessionKey: id ? `chat-${id}` : 'agent',
-        onDelta: (delta) => patchLastBot(delta),
+        onDelta: (delta) => feedDelta(delta),
       },
       abort.signal,
     );
 
     if (reply && chatIdRef.current) {
+      stopTicker();
+      revealedRef.current = reply.length;
       await addMessage(db, parseInt(chatIdRef.current), { content: reply, role: Role.Bot });
       setMessages((prev) => {
         const next = [...prev];
@@ -305,6 +340,7 @@ const ChatPage = () => {
 
     const abort = new AbortController();
     abortRef.current = abort;
+    resetTicker();
 
     const directive = taskType ? taskLevelDirective(taskType) : '';
 

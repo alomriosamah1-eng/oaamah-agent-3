@@ -22,7 +22,7 @@ import { useI18n } from '@/i18n/provider';
 import { BrandNavTitle } from '@/components/BrandNavTitle';
 import { ReelCard } from '@/components/flow/ReelCard';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
-import { fetchFeedPage, type FlowVideo } from '@/utils/flow/youtubeClient';
+import { fetchFeedPage, getFeedCache, type FlowVideo } from '@/utils/flow/youtubeClient';
 import {
   resolveStream,
   streamFitsQuality,
@@ -195,12 +195,51 @@ export function FlowScreen() {
         lastSliceTokenRef.current = next;
       }
 
+      // No live content (quota exhausted / providers down / everything seen).
+      // Fall back to the persisted feed cache so FLOW never shows a blank feed
+      // when the network providers are unavailable.
+      if (merged.length === 0) {
+        const cached = await getFeedCache(db, lang, 60);
+        const allow = allowKeywordsRef.current;
+        const avoid = avoidKeywordsRef.current;
+        for (const v of cached) {
+          if (seenRef.current.has(v.ytId)) continue;
+          if (!passesFilter(v.title, v.description, v.channel, allow, avoid)) continue;
+          seenRef.current.add(v.ytId);
+          merged.push(v);
+        }
+        lastSliceTokenRef.current = null;
+      }
+
       pageTokenRef.current = lastSliceTokenRef.current ?? undefined;
       setItems(merged);
       setFeedVersion((v) => v + 1);
       setHasMore(lastSliceTokenRef.current != null && merged.length < 200);
       setActiveIndex(0);
     } catch {
+      // Live fetch threw. Before declaring an error, try the persisted cache so
+      // FLOW still renders content (network flaps, quota, provider deaths).
+      try {
+        const cached = await getFeedCache(db, lang, 60);
+        const allow = allowKeywordsRef.current;
+        const avoid = avoidKeywordsRef.current;
+        const fromCache: FlowVideo[] = [];
+        for (const v of cached) {
+          if (seenRef.current.has(v.ytId)) continue;
+          if (!passesFilter(v.title, v.description, v.channel, allow, avoid)) continue;
+          seenRef.current.add(v.ytId);
+          fromCache.push(v);
+        }
+        if (fromCache.length > 0) {
+          setItems(fromCache);
+          setFeedVersion((v) => v + 1);
+          setHasMore(false);
+          setActiveIndex(0);
+          return;
+        }
+      } catch {
+        // ignore cache errors
+      }
       setLoadError(true);
     } finally {
       setBooting(false);
