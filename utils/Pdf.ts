@@ -1,306 +1,236 @@
+// Osamah Agent Document Engine — on-device PDF generation.
+//
+// The engine is built around a structured document schema (utils/documentSchema.ts)
+// rendered to RTL-aware, theme-matched HTML and printed by expo-print. It also ships
+// a "PDF agent": a model-driven pass that gathers the current conversation, organizes
+// it into a structured document (sections, headings, tables, cards...), and filters
+// out assistant status/tool chatter so the PDF contains only substantive content.
+
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
 
+import {
+  Block,
+  buildDocumentHtml,
+  Content,
+  DocumentSchema,
+  markdownToDocument,
+} from '@/utils/documentSchema';
+import { chatComplete, extractJson, getSelectedZenModel } from '@/utils/OpenCodeAgent';
 import { storage } from '@/utils/Storage';
+import {
+  cleanChatMessages,
+  conversationToPrompt,
+  messagesToMarkdown,
+  PdfMessage,
+} from '@/utils/chatClean';
+import { buildLongDocument, LongLlm } from '@/utils/longDocument';
 
-/**
- * On-device PDF generation for the conversation archive.
- * The markdown is rendered to RTL-aware HTML and printed to a PDF on the phone
- * itself (expo-print). A best-effort archive attempt is also made against a
- * reachable server when one is configured — failures are silently ignored.
- */
+// Re-exported for backward compatibility — the logic lives in utils/chatClean.ts.
+export { cleanChatMessages, messagesToMarkdown, PdfMessage };
 
 /* ------------------------------------------------------------------ */
-/* Markdown → HTML (port of the reference renderer, standalone)        */
+/* Markdown → HTML (kept for backward compatibility / tool reuse)      */
 /* ------------------------------------------------------------------ */
 
-function escapeHtml(s: string): string {
-  return s
+const escapeHtml = (s: string): string =>
+  s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+
+export function markdownToHtml(markdown: string): string {
+  const doc = markdownToDocument(markdown, 'document');
+  return renderBlocksHtml(doc.sections, 'dark');
 }
 
-function inline(text: string): string {
-  return escapeHtml(text).replace(
-    /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g,
-    (_match, _all, boldInner, uInner, italicInner, codeInner, linkText, linkUrl) => {
-      if (boldInner !== undefined) return `<strong>${inline(boldInner)}</strong>`;
-      if (uInner !== undefined) return `<u>${inline(uInner)}</u>`;
-      if (italicInner !== undefined) return `<em>${inline(italicInner)}</em>`;
-      if (codeInner !== undefined) return `<code>${inline(codeInner)}</code>`;
-      if (linkText !== undefined) return `<a href="${escapeHtml(linkUrl)}">${inline(linkText)}</a>`;
-      return '';
-    },
+/** Shared internal renderer — renders schema blocks with the design tokens. */
+import { renderBlock, renderBlocks, designTokens } from '@/utils/documentSchema';
+
+function renderBlocksHtml(blocks: Block[], mode: 'dark' | 'light'): string {
+  const tokens = mode === 'dark' ? designTokens.dark : designTokens.light;
+  return blocks.map((b) => renderBlock(b, tokens)).join('\n');
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme + page layout (page numbers at the top corner)                */
+/* ------------------------------------------------------------------ */
+
+function pageCss(mode: 'dark' | 'light'): string {
+  const t = mode === 'dark' ? designTokens.dark : designTokens.light;
+  return `
+  @page {
+    margin: 18mm 14mm 16mm 14mm;
+    @top-right {
+      content: counter(page);
+      font-size: 9px;
+      color: ${t.textSecondary};
+      margin-bottom: 6mm;
+    }
+  }
+  h1, h2, h3, h4 { page-break-after: avoid; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  .avoid-break { page-break-inside: avoid; }
+  .page-break { page-break-before: always; }
+  `;
+}
+
+/* ------------------------------------------------------------------ */
+/* Document schema → PDF                                               */
+/* ------------------------------------------------------------------ */
+
+export type PdfMode = 'dark' | 'light';
+
+export interface AgentPdfOptions {
+  title?: string;
+  lang?: 'ar' | 'en';
+  mode?: PdfMode;
+  signal?: AbortSignal;
+  model?: string;
+  /** Progress callback — short user-facing status labels only. */
+  onStatus?: (
+    phase: 'organizing' | 'building' | 'rendering' | 'verifying' | 'done' | 'writing',
+    label?: string,
+    current?: number,
+    total?: number,
+  ) => void;
+}
+
+/**
+ * Render a structured DocumentSchema to a PDF file on-device.
+ * Handles very large documents by rendering schema sections incrementally
+ * into a single HTML string (no DOM, string-join only).
+ */
+export async function generateDocumentPdf(
+  schema: DocumentSchema,
+  opts: { mode?: PdfMode } = {},
+): Promise<string> {
+  const html = buildDocumentHtml(schema);
+  const { uri } = await Print.printToFileAsync({
+    html: injectPageCss(html, opts.mode ?? schema.theme.mode ?? 'dark'),
+  });
+  return uri;
+}
+
+function injectPageCss(html: string, mode: PdfMode): string {
+  const insertion = pageCss(mode);
+  return html.replace(
+    /<\/style>/,
+    `${insertion}\n</style>`,
   );
 }
 
-interface TableAcc {
-  headers: string[];
-  rows: string[][];
+/* ------------------------------------------------------------------ */
+/* PDF agent — organizes the conversation into a structured document   */
+/* ------------------------------------------------------------------ */
+
+const DOCUMENT_JSON_RULE =
+  'Reply with ONLY a single valid JSON object matching the requested schema. No markdown fences, no commentary, no explanation, no trailing text.';
+
+const DOCUMENT_PLAN_SYSTEM = `You are the document organization engine of Osamah agent.
+Your job: turn the raw conversation transcript below into a structured, professional Arabic document.
+The document must contain ONLY the substantive content — the questions asked and the core information/knowledge conveyed in the answers.
+Rules:
+1. Remove every conversational filler: greetings, "سأقوم", "تم إنشاء", status lines, agent small talk, sign-offs.
+2. Organize the remaining content into clear sections with headings, paragraphs, lists, tables, cards, callouts, and quotes as appropriate.
+3. Prefer tables for comparisons and parallel data.
+4. Keep the content faithful to the answers — do not invent new facts, do not reduce depth.
+5. The document must stand alone: an executive summary at the top summarizing the whole exchange.
+
+Output a JSON object with this exact schema:
+{
+  "metadata": { "title": "string", "subtitle": "string", "author": "string", "date": "string", "lang": "ar", "description": "string" },
+  "theme": { "mode": "dark" },
+  "cover": { "title": "string", "subtitle": "string", "badge": "وكيل أسامة", "description": "string" },
+  "sections": [
+    { "type": "heading", "level": 1, "content": ["التنفيذ"] },
+    { "type": "paragraph", "content": ["string"] },
+    { "type": "heading", "level": 2, "content": ["string"] },
+    { "type": "list", "ordered": false, "items": [["string"], ["string"]] },
+    { "type": "table", "columns": ["string"], "rows": [[["string"], ["string"]]], "caption": "string?" },
+    { "type": "card", "title": "string?", "content": ["string"] },
+    { "type": "callout", "kind": "note|tip|warning|important", "content": ["string"] },
+    { "type": "quote", "text": "string", "author": "string?" },
+    { "type": "code", "language": "string?", "code": "string" },
+    { "type": "stats", "items": [{ "label": "string", "value": "string" }] },
+    { "type": "timeline", "items": [{ "title": "string", "date": "string?", "content": ["string"] }] },
+    { "type": "section", "title": "string", "blocks": [ ...nested blocks... ] },
+    { "type": "comparison", "title": "string?", "columns": ["string"], "rows": [[["string"], ["string"]]] },
+    { "type": "hr" }
+  ]
 }
+Content fragments inside text fields may be strings or rich objects: {"bold": true, "text": "..."}, {"code": true, "text": "..."}.`;
 
-function isTableSeparator(line: string): boolean {
-  return /^\s*\|?\s*:?-{3,}\s*(\|\s*:?-{3,}\s*)+\|?\s*$/.test(line);
-}
+/**
+ * PDF agent: gather the session conversation and organize it into a
+ * structured DocumentSchema. Falls back to a plain schema if the model fails.
+ */
+export async function organizeConversation(
+  messages: PdfMessage[],
+  opts: { title?: string; lang?: 'ar' | 'en'; model?: string; signal?: AbortSignal } = {},
+): Promise<DocumentSchema> {
+  const cleaned = cleanChatMessages(messages);
+  const lang = opts.lang ?? 'ar';
+  const title = opts.title ?? (lang === 'ar' ? 'مستند المحادثة' : 'Conversation document');
 
-function splitTableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((c) => c.trim());
-}
-
-export function markdownToHtml(markdown: string): string {
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
-  const out: string[] = [];
-  let i = 0;
-  let paragraph: string[] = [];
-  let inCode = false;
-  let codeBuf: string[] = [];
-  let listType: 'ul' | 'ol' | null = null;
-  let listBuf: string[] = [];
-  let quoteBuf: string[] = [];
-  let table: TableAcc | null = null;
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      out.push(`<p>${inline(paragraph.join(' '))}</p>`);
-      paragraph = [];
-    }
-  };
-  const flushList = () => {
-    if (listType && listBuf.length > 0) {
-      const tag = listType === 'ul' ? 'ul' : 'ol';
-      out.push(`<${tag}>${listBuf.map((li) => `<li>${inline(li)}</li>`).join('')}</${tag}>`);
-    }
-    listType = null;
-    listBuf = [];
-  };
-  const flushQuote = () => {
-    if (quoteBuf.length > 0) {
-      out.push(`<blockquote>${quoteBuf.map((q) => `<p>${inline(q)}</p>`).join('')}</blockquote>`);
-      quoteBuf = [];
-    }
-  };
-  const flushTable = () => {
-    if (table) {
-      const thead = `<thead><tr>${table.headers.map((h) => `<th>${inline(h)}</th>`).join('')}</tr></thead>`;
-      const tbody = `<tbody>${table.rows
-        .map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`)
-        .join('')}</tbody>`;
-      out.push(`<table>${thead}${tbody}</table>`);
-      table = null;
-    }
-  };
-
-  const flushAll = () => {
-    flushParagraph();
-    flushList();
-    flushQuote();
-    flushTable();
-  };
-
-  for (; i < lines.length; i++) {
-    const raw = lines[i];
-    const line = raw.trim();
-
-    if (inCode) {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inCode = false;
-        out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
-        codeBuf = [];
-      } else {
-        codeBuf.push(raw);
-      }
-      continue;
-    }
-
-    if (/^\s*(```|~~~)/.test(line)) {
-      flushAll();
-      inCode = true;
-      continue;
-    }
-
-    if (!line) {
-      flushAll();
-      continue;
-    }
-
-    // Table separator
-    if (isTableSeparator(line)) {
-      if (table && table.rows.length === 0) {
-        table.headers = splitTableRow(table.headers.join('|'));
-        continue;
-      }
-    }
-
-    // Table row
-    if (/^\s*\|.*\|\s*$/.test(line)) {
-      flushParagraph();
-      flushList();
-      flushQuote();
-      const cells = splitTableRow(line);
-      if (!table) table = { headers: cells, rows: [] };
-      else table.rows.push(cells);
-      continue;
-    }
-
-    flushTable();
-
-    // Heading
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) {
-      flushAll();
-      const level = h[1].length;
-      out.push(`<h${level}>${inline(h[2])}</h${level}>`);
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
-      flushAll();
-      out.push('<hr />');
-      continue;
-    }
-
-    // Blockquote
-    if (/^>\s?/.test(line)) {
-      flushParagraph();
-      flushList();
-      flushTable();
-      quoteBuf.push(line.replace(/^>\s?/, ''));
-      continue;
-    }
-    flushQuote();
-
-    // Unordered list
-    const ul = /^[-*+]\s+(.*)$/.exec(line);
-    if (ul) {
-      flushParagraph();
-      flushTable();
-      if (listType !== 'ul') {
-        flushList();
-        listType = 'ul';
-      }
-      listBuf.push(ul[1]);
-      continue;
-    }
-
-    // Ordered list
-    const ol = /^\d+[.)]\s+(.*)$/.exec(line);
-    if (ol) {
-      flushParagraph();
-      flushTable();
-      if (listType !== 'ol') {
-        flushList();
-        listType = 'ol';
-      }
-      listBuf.push(ol[1]);
-      continue;
-    }
-    flushList();
-
-    paragraph.push(line);
+  if (cleaned.length === 0) {
+    return markdownToDocument('# ' + title, title);
   }
 
-  flushAll();
-  return out.join('\n');
-}
+  try {
+    const model = opts.model ?? (await getSelectedZenModel());
+    const reply = await chatComplete(
+      {
+        system: DOCUMENT_PLAN_SYSTEM,
+        user: `${DOCUMENT_JSON_RULE}\n\nTitle: ${title}\n\nConversation:\n${conversationToPrompt(cleaned)}`,
+        temperature: 0.4,
+        maxTokens: 4000,
+        model,
+      },
+      opts.signal,
+    );
 
-/* ------------------------------------------------------------------ */
-/* HTML document wrapper (RTL, dark-read-friendly print palette)        */
-/* ------------------------------------------------------------------ */
-
-const CSS = `
-  * { box-sizing: border-box; }
-  html { direction: rtl; }
-  body {
-    font-family: -apple-system, 'Segoe UI', 'Noto Sans Arabic', 'DejaVu Sans', sans-serif;
-    font-size: 11pt;
-    line-height: 1.7;
-    color: #1f2937;
-    direction: rtl;
-    unicode-bidi: plaintext;
-    text-align: right;
-    padding: 24px;
+    const parsed = extractJson<DocumentSchema>(reply);
+    if (!parsed || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
+      throw new Error('invalid document schema');
+    }
+    return {
+      metadata: {
+        title: parsed.metadata?.title || title,
+        subtitle: parsed.metadata?.subtitle,
+        author: parsed.metadata?.author || (lang === 'ar' ? 'وكيل أسامة' : 'Osamah agent'),
+        date: new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', {
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }),
+        lang,
+        description: parsed.metadata?.description,
+      },
+      theme: { mode: 'dark' },
+      cover: parsed.cover || {
+        title: parsed.metadata?.title || title,
+        badge: 'وكيل أسامة',
+        subtitle: parsed.metadata?.subtitle,
+      },
+      sections: sanitizeSections(parsed.sections),
+    };
+  } catch {
+    const markdown = messagesToMarkdown(cleaned);
+    return markdownToDocument(markdown, title);
   }
-  .head { text-align: center; margin-bottom: 18px; }
-  .head h1 { font-size: 18pt; color: #111827; margin: 4px 0; }
-  .head .meta { font-size: 9pt; color: #6b7280; }
-  h1, h2, h3, h4, h5, h6 { color: #4338ca; line-height: 1.4; margin: 14px 0 6px 0; }
-  h1 { font-size: 16pt; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
-  h2 { font-size: 13.5pt; }
-  h3 { font-size: 12pt; }
-  p { margin: 0 0 8px 0; }
-  strong { color: #111827; }
-  a { color: #4338ca; text-decoration: none; }
-  ul, ol { margin: 0 0 8px 0; padding-right: 18px; }
-  li { margin-bottom: 2px; }
-  blockquote { border-right: 3px solid #4338ca; background: #eef2ff; margin: 0 0 8px 0; padding: 6px 12px; color: #374151; }
-  code { font-family: 'DejaVu Sans Mono', monospace; font-size: 9.5pt; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
-  pre { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 6px; overflow: hidden; direction: ltr; text-align: left; }
-  pre code { background: transparent; color: inherit; }
-  table { border-collapse: collapse; width: 100%; margin: 0 0 10px 0; }
-  th, td { border: 0.6px solid #d1d5db; padding: 5px 8px; font-size: 10pt; }
-  th { background: #eef2ff; color: #3730a3; font-weight: 700; }
-  tr:nth-child(even) td { background: #f9fafb; }
-  hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
-  .footer-note { text-align: center; font-size: 8pt; color: #9ca3af; margin-top: 18px; }
-`;
+}
 
-export function markdownToPdfHtml(markdown: string, meta: { title: string; dateLabel: string }): string {
-  return `<!doctype html>
-<html lang="ar">
-<head>
-  <meta charset="utf-8" />
-  <style>${CSS}</style>
-</head>
-<body>
-  <div class="head">
-    <h1>${escapeHtml(meta.title)}</h1>
-    <div class="meta">${escapeHtml(meta.dateLabel)}</div>
-  </div>
-  ${markdownToHtml(markdown)}
-  <div class="footer-note">© 2026 Osamah agent — تم الإنشاء على الجهاز</div>
-</body>
-</html>`;
+function sanitizeSections(blocks: Block[]): Block[] {
+  return blocks.filter((b) => typeof b === 'object' && b !== null && typeof (b as { type?: string }).type === 'string');
 }
 
 /* ------------------------------------------------------------------ */
-/* Conversation → markdown                                              */
+/* Full flow: share the PDF after generation                           */
 /* ------------------------------------------------------------------ */
-
-export interface PdfMessage {
-  role: 'user' | 'bot' | string | number;
-  content: string;
-}
-
-export function messagesToMarkdown(messages: PdfMessage[]): string {
-  const parts: string[] = [];
-  for (const m of messages) {
-    if (!m || typeof m.content !== 'string' || m.content.trim() === '') continue;
-    const label = m.role === 'user' ? 'المستخدم' : 'الوكيل';
-    parts.push(`### ${label}\n\n${m.content}`);
-  }
-  return parts.join('\n\n');
-}
-
-/* ------------------------------------------------------------------ */
-/* PDF generation                                                      */
-/* ------------------------------------------------------------------ */
-
-export async function generatePdf(markdown: string, title: string): Promise<string> {
-  const now = new Date();
-  const dateLabel = now.toLocaleString('ar-EG', { dateStyle: 'long', timeStyle: 'short' });
-  const html = markdownToPdfHtml(markdown, { title, dateLabel });
-  const { uri } = await Print.printToFileAsync({ html });
-  return uri;
-}
 
 export async function sharePdf(uri: string): Promise<void> {
   if (!(await Sharing.isAvailableAsync())) {
@@ -313,7 +243,115 @@ export async function sharePdf(uri: string): Promise<void> {
   });
 }
 
-/** Full flow: markdown → PDF file → native share sheet. */
+function defaultDocTitle(lang: 'ar' | 'en'): string {
+  return `${lang === 'ar' ? 'وكيل أسامة' : 'Osamah agent'} — ${new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}`;
+}
+
+/**
+ * Full agent-driven flow: conversation → organized DocumentSchema → on-device
+ * PDF file → native share sheet. Reports short lifecycle statuses via onStatus.
+ */
+export async function saveConversationAsPdf(
+  messages: PdfMessage[],
+  opts: AgentPdfOptions = {},
+): Promise<string> {
+  const lang = opts.lang ?? 'ar';
+  const title = opts.title ?? defaultDocTitle(lang);
+
+  opts.onStatus?.('organizing', lang === 'ar' ? 'جارٍ تنظيم المحتوى…' : 'Organizing content…');
+
+  const schema = await organizeConversation(messages, {
+    title,
+    lang,
+    model: opts.model,
+    signal: opts.signal,
+  });
+
+  opts.onStatus?.('building', lang === 'ar' ? 'جارٍ بناء المستند…' : 'Building document…');
+
+  const uri = await generateDocumentPdf(schema, { mode: opts.mode ?? 'dark' });
+
+  opts.onStatus?.('rendering', lang === 'ar' ? 'جارٍ إنشاء الملف…' : 'Generating file…');
+
+  await sharePdf(uri);
+
+  opts.onStatus?.('verifying', lang === 'ar' ? 'جارٍ التحقق…' : 'Verifying…');
+  opts.onStatus?.('done', lang === 'ar' ? 'تم إنشاء الملف' : 'File created');
+
+  return uri;
+}
+
+/**
+ * Long-form variant of the PDF flow. Routes the conversation through
+ * buildLongDocument (sectioned, scalable to 100/500/1000+ pages) instead of
+ * the single-shot organizer, then renders/shares exactly like the basic flow.
+ */
+export async function saveConversationAsLongPdf(
+  messages: PdfMessage[],
+  opts: AgentPdfOptions = {},
+): Promise<string> {
+  const lang = opts.lang ?? 'ar';
+  const title = opts.title ?? defaultDocTitle(lang);
+
+  opts.onStatus?.('organizing', lang === 'ar' ? 'جارٍ تنظيم المحتوى…' : 'Organizing content…');
+
+  const longLlm: LongLlm = async (args, signal) =>
+    chatComplete(
+      {
+        system: args.system,
+        user: args.user,
+        temperature: args.temperature,
+        maxTokens: args.maxTokens,
+        model: args.model ?? opts.model ?? (await getSelectedZenModel().catch(() => undefined)),
+      },
+      signal,
+    );
+
+  const schema = await buildLongDocument(messages, {
+    title,
+    lang,
+    model: opts.model,
+    signal: opts.signal,
+    llm: longLlm,
+    onStatus: (status) =>
+      opts.onStatus?.(
+        status.phase === 'planning'
+          ? 'organizing'
+          : status.phase === 'writing'
+            ? 'writing'
+            : 'building',
+        status.label,
+        status.current,
+        status.total,
+      ),
+  });
+
+  opts.onStatus?.('building', lang === 'ar' ? 'جارٍ بناء المستند…' : 'Building document…');
+
+  const uri = await generateDocumentPdf(schema, { mode: opts.mode ?? 'dark' });
+
+  opts.onStatus?.('rendering', lang === 'ar' ? 'جارٍ إنشاء الملف…' : 'Generating file…');
+
+  await sharePdf(uri);
+
+  opts.onStatus?.('verifying', lang === 'ar' ? 'جارٍ التحقق…' : 'Verifying…');
+  opts.onStatus?.('done', lang === 'ar' ? 'تم إنشاء الملف' : 'File created');
+
+  return uri;
+}
+
+/* ------------------------------------------------------------------ */
+/* Backward-compatible helpers (used by existing screens)              */
+/* ------------------------------------------------------------------ */
+
+export async function generatePdf(markdown: string, title: string): Promise<string> {
+  const now = new Date();
+  const dateLabel = now.toLocaleString('ar-EG', { dateStyle: 'long', timeStyle: 'short' });
+  const doc = markdownToDocument(markdown, title);
+  doc.metadata.date = dateLabel;
+  return generateDocumentPdf(doc, { mode: 'dark' });
+}
+
 export async function saveMarkdownAsPdf(markdown: string, title: string): Promise<string> {
   const uri = await generatePdf(markdown, title);
   await sharePdf(uri);
@@ -321,14 +359,9 @@ export async function saveMarkdownAsPdf(markdown: string, title: string): Promis
 }
 
 /* ------------------------------------------------------------------ */
-/* Best-effort server archive (mirrors the reference's tolerance)       */
+/* Best-effort server archive                                          */
 /* ------------------------------------------------------------------ */
 
-/**
- * Tries to archive the document to a reachable server when one is configured
- * (stored `serverUrl`). Failures are silently ignored — PDF still works fully
- * on-device. Returns the archived document id when the server accepted it.
- */
 export async function archiveToServer(
   title: string,
   content: string,
@@ -358,7 +391,9 @@ export async function archiveToServer(
   }
 }
 
-/** True when the current platform supports on-device PDF printing. */
 export function pdfSupportedOnPlatform(): boolean {
   return Platform.OS === 'android' || Platform.OS === 'ios';
 }
+
+export { renderBlocksHtml };
+export type { Content };

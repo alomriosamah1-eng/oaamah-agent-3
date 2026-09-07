@@ -1,17 +1,15 @@
-// User-facing voice configuration — the single source of truth the UI, engine
-// and providers all read from. Stored locally only; no provider credentials
-// live anywhere in the app.
+// Voice configuration — mirrors the desktop assistant's fixed voice set
+// (config/constants.py + the edge-tts chain in floating_assistant.py), with a
+// couple of phone-suitable knobs. No provider modes, no voice catalogue:
+// the desktop picks one neural voice by gender/language and we do the same.
 
-import { VoiceLocale } from './catalog';
+export type VoiceGender = 'female' | 'male';
 
-export type VoiceGender = 'male' | 'female';
-
-export type ProviderMode = 'auto' | 'azure' | 'google' | 'android';
+export type VoiceLocale = 'ar-SY' | 'ar-SA' | 'en-US';
 
 export interface VoiceConfig {
   locale: VoiceLocale;
   gender: VoiceGender;
-  mode: ProviderMode;
   speakingRate: number;
   pitch: number;
   volume: number;
@@ -20,7 +18,6 @@ export interface VoiceConfig {
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   locale: 'ar-SY',
   gender: 'female',
-  mode: 'auto',
   speakingRate: 1,
   pitch: 1,
   volume: 1,
@@ -32,16 +29,10 @@ export function normalizeVoiceConfig(raw: unknown): VoiceConfig {
   const base = { ...DEFAULT_VOICE_CONFIG };
   if (!raw || typeof raw !== 'object') return base;
   const o = raw as Record<string, unknown>;
-  if (typeof o.locale === 'string') base.locale = o.locale as VoiceLocale;
-  if (o.gender === 'male' || o.gender === 'female') base.gender = o.gender;
-  if (
-    o.mode === 'auto' ||
-    o.mode === 'azure' ||
-    o.mode === 'google' ||
-    o.mode === 'android'
-  ) {
-    base.mode = o.mode;
+  if (o.locale === 'ar-SY' || o.locale === 'ar-SA' || o.locale === 'en-US') {
+    base.locale = o.locale as VoiceLocale;
   }
+  if (o.gender === 'male' || o.gender === 'female') base.gender = o.gender;
   if (typeof o.speakingRate === 'number' && o.speakingRate > 0) {
     base.speakingRate = o.speakingRate;
   }

@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
 import { typography } from '@/theme/typography';
 import { withAlpha, CyanNeon, DeepViolet, MagentaGlow, EmeraldGlow, ElectricBlue, Red } from '@/theme/colors';
@@ -35,8 +37,10 @@ const Page = () => {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const voice = useVoiceController();
+  const router = useRouter();
 
   const topSafeArea = insets.top > 0 ? insets.top + 4 : 10;
+  const bottomClearance = TAB_BAR_HEIGHT + insets.bottom;
   const orbSize = Math.min(width * 0.66, 300);
   const hasError = voice.lastError.length > 0 && voice.phase === 'idle';
 
@@ -45,14 +49,10 @@ const Page = () => {
     ? { color: Red, colorTo: MagentaGlow }
     : ORB_COLORS[voice.phase] ?? ORB_COLORS.idle;
 
+  // One press controls the whole conversation: idle → start listening,
+  // anything active → stop everything (turn the mic + agent + voice off).
   const onOrbPress = useCallback(() => {
-    if (voice.phase === 'listening') {
-      voice.toggle();
-    } else if (voice.phase === 'thinking' || voice.phase === 'speaking') {
-      voice.stop();
-    } else {
-      voice.toggle();
-    }
+    voice.toggle();
   }, [voice]);
 
   return (
@@ -67,7 +67,9 @@ const Page = () => {
         <Pressable
           onPress={onOrbPress}
           accessibilityRole="button"
-          accessibilityLabel={t('voice.tapToListen')}
+          accessibilityLabel={
+            voice.phase === 'idle' ? t('voice.tapToListen') : t('voice.tapToStop')
+          }
           style={({ pressed }) => [styles.orbPress, { width: orbSize + 22, height: orbSize + 22 }, pressed && { opacity: 0.92 }]}>
           <View style={[styles.orbHalo, { borderColor: withAlpha(palette.color, 0.4) }]} />
           <VoiceOrb
@@ -82,9 +84,39 @@ const Page = () => {
         </Pressable>
 
         <Text style={[styles.tapHint, { color: colors.onSurfaceVariant }]} numberOfLines={1}>
-          {t('voice.tapToListen')}
+          {voice.phase === 'idle' ? t('voice.tapToListen') : t('voice.tapToStop')}
+        </Text>
+
+        <Text
+          style={[
+            styles.statusLine,
+            { color: hasError ? Red : withAlpha(colors.onSurfaceVariant, 0.62) },
+          ]}
+          numberOfLines={1}>
+          {hasError
+            ? voice.lastError || voice.diag || ''
+            : voice.sttNeedsGateway
+              ? t('voice.cloudSttNeedsGateway')
+              : voice.providerLine}
         </Text>
       </View>
+
+      <Pressable
+        onPress={() => router.navigate('/chat')}
+        accessibilityRole="button"
+        accessibilityLabel={t('home.searchPlaceholder')}
+        style={({ pressed }) => [
+          styles.searchBar,
+          { bottom: bottomClearance + 12, opacity: pressed ? 0.85 : 1 },
+        ]}>
+        <View style={[styles.searchIcon, { backgroundColor: withAlpha(CyanNeon, 0.14) }]}>
+          <MaterialIcons name="search" size={20} color={CyanNeon} />
+        </View>
+        <Text style={[styles.searchText, { color: colors.onSurfaceVariant }]} numberOfLines={1}>
+          {t('home.searchPlaceholder')}
+        </Text>
+        <MaterialIcons name="arrow-forward" size={18} color={withAlpha(colors.onSurfaceVariant, 0.8)} />
+      </Pressable>
     </View>
   );
 };
@@ -92,11 +124,10 @@ const Page = () => {
 const styles = StyleSheet.create({
   root: { flex: 1, overflow: 'hidden' },
   orbZone: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    paddingBottom: TAB_BAR_HEIGHT,
   },
   orbPress: {
     alignItems: 'center',
@@ -115,6 +146,44 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 32,
     opacity: 0.85,
+  },
+  statusLine: {
+    ...(typography.labelSmall as any),
+    textAlign: 'center',
+    paddingHorizontal: 24,
+    fontSize: 11,
+    opacity: 0.9,
+  },
+  searchBar: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    height: 52,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: withAlpha(CyanNeon, 0.25),
+    backgroundColor: 'rgba(31,41,55,0.55)',
+    shadowColor: CyanNeon,
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  searchIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchText: {
+    flex: 1,
+    ...(typography.bodyMedium as any),
+    fontSize: 14,
   },
 });
 

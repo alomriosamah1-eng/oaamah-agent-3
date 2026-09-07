@@ -2,9 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
-import { typography, FontWeights } from '@/theme/typography';
+import { typography } from '@/theme/typography';
 import { withAlpha, CyanNeon, DeepViolet, AmberGlow } from '@/theme/colors';
-import { GlassCard } from '@/theme/GlassComponents';
 import { useI18n } from '@/i18n/provider';
 import { formatHijri } from '@/utils/hijri';
 
@@ -14,16 +13,18 @@ const GREG_WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', '�
 const GREG_WEEKDAYS_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const ROW_H = 52;
-const SLIDE_MS = 5000;
+const PAUSE_MS = 7000;
+const ANIM_MS = 420;
 
 function pad(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
 }
 
-/** One rectangular card showing time + dates as a continuous vertical ticker:
- *  clock → Gregorian+Hijri year → Gregorian date → Hijri date, no titles.
- *  Motion uses React Native's core Animated (native driver) so it always runs
- *  in Expo Go — the first slide is duplicated at the end for a seamless loop. */
+/** One time + dates card as a vertical ticker: clock → Gregorian+Hijri year →
+ *  Gregorian date → Hijri date, no titles. Each slide pauses 7s then eases to
+ *  the next. Uses React Native's core Animated (native driver) so it always
+ *  runs in Expo Go — the first slide is duplicated at the end so the loop
+ *  wraps seamlessly. */
 export function DateTimeCard() {
   const { colors } = useTheme();
   const { lang } = useI18n();
@@ -83,59 +84,61 @@ export function DateTimeCard() {
     },
   ];
 
-  const progress = useRef(new Animated.Value(0)).current;
+  const totalSlides = slides.length + 1; // + duplicated first for seamless wrap
+  const [index, setIndex] = useState(0);
+  const step = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.timing(progress, {
-        toValue: ROW_H * slides.length,
-        duration: SLIDE_MS * slides.length,
-        easing: Easing.linear,
-        useNativeDriver: true,
-        isInteraction: false,
-      }),
-      { resetBeforeIteration: true }
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [progress, slides.length]);
+    const timer = setInterval(() => {
+      step.setValue(0);
+      setIndex((prev) => (prev + 1) % totalSlides);
+    }, PAUSE_MS);
+    return () => clearInterval(timer);
+  }, [step, totalSlides]);
 
-  const translateY = progress.interpolate({
-    inputRange: [0, ROW_H * slides.length],
-    outputRange: [0, -(ROW_H * slides.length)],
+  useEffect(() => {
+    Animated.timing(step, {
+      toValue: 1,
+      duration: ANIM_MS,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true,
+      isInteraction: false,
+    }).start();
+  }, [index, step]);
+
+  const translateY = step.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -ROW_H * index],
     extrapolate: 'clamp',
   });
 
   return (
     <View style={styles.outer}>
-      <GlassCard cornerRadius={18} style={styles.card}>
-        <View
-          style={[
-            styles.window,
-            { backgroundColor: withAlpha(colors.surfaceVariant, 0.45), borderColor: withAlpha(colors.outline, 0.2) },
-          ]}>
-          <Animated.View style={[styles.mover, { transform: [{ translateY }] }]}>
-            {[...slides, slides[0]].map((s, i) => (
-              <View key={`${s.key}-${i}`} style={styles.slide}>
-                <View style={[styles.iconBox, { backgroundColor: s.tint }]}>
-                  <MaterialIcons name={s.icon as any} size={14} color={s.color} />
-                </View>
-                <Text style={[styles.text, { color: colors.onSurface }]} numberOfLines={1}>
-                  {s.text}
-                </Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: withAlpha(colors.surfaceVariant, 0.45), borderColor: withAlpha(colors.outline, 0.2) },
+        ]}>
+        <Animated.View style={[styles.mover, { transform: [{ translateY }] }]}>
+          {[...slides, slides[0]].map((s, i) => (
+            <View key={`${s.key}-${i}`} style={styles.slide}>
+              <View style={[styles.iconBox, { backgroundColor: s.tint }]}>
+                <MaterialIcons name={s.icon as any} size={14} color={s.color} />
               </View>
-            ))}
-          </Animated.View>
-        </View>
-      </GlassCard>
+              <Text style={[styles.text, { color: colors.onSurface }]} numberOfLines={1}>
+                {s.text}
+              </Text>
+            </View>
+          ))}
+        </Animated.View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   outer: { width: '100%', paddingHorizontal: 20, marginTop: 4 },
-  card: { width: '100%' },
-  window: {
+  card: {
     height: ROW_H,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

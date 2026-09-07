@@ -38,13 +38,6 @@
       "expo-router",
       "expo-secure-store",
       [
-        "@react-native-voice/voice",
-        {
-          "microphonePermission": "Allow Osamah agent to access your microphone",
-          "speechRecognitionPermission": "Allow Osamah agent to recognize your speech"
-        }
-      ],
-      [
         "expo-media-library",
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos.",
@@ -60,14 +53,19 @@
             "minSdkVersion": 29
           }
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "zenApiKey": "",
-      "voiceGatewayUrl": "http://192.168.0.232:8100"
+      "voiceGatewayUrl": "http://192.168.0.232:8100",
+      "ytApiKey": "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90",
+      "ytApiKeys": [
+        "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90"
+      ]
     }
   }
 }

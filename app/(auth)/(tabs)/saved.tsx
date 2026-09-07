@@ -9,8 +9,7 @@ import { withAlpha, CyanNeon } from '@/theme/colors';
 import { Spacer } from '@/theme/primitives';
 import { useI18n } from '@/i18n/provider';
 import { useSQLiteContext } from 'expo-sqlite';
-import { deleteChat, getChatsWithPreview, renameChat } from '@/utils/Database';
-import { ChatWithPreview } from '@/utils/Database';
+import { deleteChat, getChatsWithPreview, renameChat, ChatWithPreview } from '@/utils/Database';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
 import { useFocusEffect } from 'expo-router';
 
@@ -138,7 +137,7 @@ const Page = () => {
       ) : (
         <View style={{ gap: 8 }}>
           {chats.map((chat) => (
-            <View key={chat.id} style={[s.card, { backgroundColor: withAlpha(colors.surfaceVariant, 0.55), borderColor: withAlpha(colors.outline, 0.2) }]}>
+            <View key={chat.id} style={[styles.card, { backgroundColor: withAlpha(colors.surfaceVariant, 0.55), borderColor: withAlpha(colors.outline, 0.2) }]}>
               <Pressable style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }} onPress={() => onOpen(chat.id)} onLongPress={() => onRename(chat.id)}>
                 <View
                   style={{
@@ -177,7 +176,7 @@ const Page = () => {
   );
 };
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',

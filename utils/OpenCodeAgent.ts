@@ -4,13 +4,13 @@ import Constants from 'expo-constants';
 import { fetch as streamingFetch } from 'expo/fetch';
 
 import { storage } from '@/utils/Storage';
+import { createSession, resetServerCache, resolveServer, sendMessage } from '@/utils/Opencode';
 
 /**
  * In-app agent engine — the opencode agent runs INSIDE the app.
- * Instead of shelling out to the opencode binary (impossible on Android after
- * export) or depending on a LAN server, the app speaks directly to the same
- * OpenCode Zen gateway the binary uses, with automatic smart switching between
- * free models when tokens/quota run out.
+ * The app binds to the user's own opencode server when reachable (opencode
+ * serve, authenticated on the host), and falls back to the OpenCode Zen
+ * gateway with automatic smart switching between free models.
  *
  * No agent settings are exposed in the UI: the model chain below is fixed (it
  * mirrors the opencode source's free catalog) and the optional Zen API key is
@@ -18,6 +18,65 @@ import { storage } from '@/utils/Storage';
  */
 
 const ZEN_BASE = 'https://opencode.ai/zen/v1';
+
+/**
+ * Model requested from the user's own opencode server. The server already
+ * carries the user's opencode credentials, so it serves the same working
+ * model the desktop CLI uses — no Zen free-tier session needed.
+ */
+const SERVER_MODEL = { id: 'big-pickle', providerID: 'opencode' };
+
+/** One server session per conversation; created on first message. */
+const serverSessions = new Map<string, string | null>();
+
+export function resetServerSession(): void {
+  serverSessions.clear();
+  resetServerCache();
+}
+
+async function resolveServerSession(key: string, signal?: AbortSignal): Promise<string> {
+  const existing = serverSessions.get(key);
+  if (existing) return existing;
+  const session = await createSession({
+    title: 'Osamah agent',
+    model: SERVER_MODEL,
+    signal,
+  });
+  serverSessions.set(key, session.id);
+  return session.id;
+}
+
+/**
+ * Primary transport: bind to the user's opencode server on the LAN.
+ * Falls back to the Zen hub below when the server is unreachable.
+ */
+async function serverChat(
+  userPrompt: string,
+  system: string | undefined,
+  sessionKey: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  signal?.addEventListener('abort', () => controller.abort(), { once: true });
+  try {
+    await resolveServer(controller.signal);
+    const sessionId = await resolveServerSession(sessionKey, controller.signal);
+    const text = system ? `[System instructions]\n${system}\n\n${userPrompt}` : userPrompt;
+    const reply = await sendMessage(sessionId, text, { signal: controller.signal });
+    const trimmed = reply.trim();
+    if (!trimmed) throw new Error('empty opencode server reply');
+    return trimmed;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Whether the server should be given priority (it is, unless the caller opts out). */
+function useServerFirst(args: { serverFirst?: boolean }): boolean {
+  return args.serverFirst !== false;
+}
 
 /**
  * Requested order: models verified to stream real `content` deltas (not just
@@ -88,6 +147,10 @@ export interface ChatArgs {
   model?: string;
   /** Fixed chain override (used when the user picked a model, then fallbacks). */
   chain?: string[];
+  /** Ties an opencode server session to one conversation (defaults to 'agent'). */
+  sessionKey?: string;
+  /** Set to false to skip the opencode-server transport and go straight to Zen. */
+  serverFirst?: boolean;
 }
 
 interface ChatCompletionPayload {
@@ -131,6 +194,14 @@ async function requestModel(model: string, payload: ChatCompletionPayload, timeo
 
 /** Single-shot completion with automatic model switching on quota/token exhaustion. */
 export async function chatComplete(args: ChatArgs, signal?: AbortSignal): Promise<string> {
+  if (useServerFirst(args)) {
+    try {
+      return await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 90_000, signal);
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      // server unreachable/failed — fall through to the Zen gateway
+    }
+  }
   const chain = args.chain && args.chain.length > 0 ? args.chain : args.model ? [args.model, ...DEFAULT_MODEL_CHAIN.filter((m) => m !== args.model)] : DEFAULT_MODEL_CHAIN;
   const payload = {
     model: '', // set per attempt below
@@ -169,6 +240,16 @@ export async function chatStream(
   args: ChatArgs & { onDelta: (delta: string) => void },
   signal?: AbortSignal,
 ): Promise<string> {
+  if (useServerFirst(args)) {
+    try {
+      const full = await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 240_000, signal);
+      args.onDelta(full);
+      return full;
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      // server unreachable/failed — fall through to the Zen gateway
+    }
+  }
   const chain = args.chain && args.chain.length > 0 ? args.chain : args.model ? [args.model, ...DEFAULT_MODEL_CHAIN.filter((m) => m !== args.model)] : DEFAULT_MODEL_CHAIN;
   let lastError: unknown = null;
   for (let pass = 0; pass < 2; pass++) {
@@ -265,17 +346,9 @@ export const OSAMAH_SYSTEM = `You are «Osamah agent», a smart, Arabic-first pe
 
 const JSON_RULE = `Reply with ONLY a single valid JSON object. No markdown fences, no commentary, no trailing text.`;
 
-/** Extracts a JSON object from a model reply that may include fences or prose. */
-export function extractJson<T>(reply: string): T {
-  const fenced = reply.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : reply;
-  const start = candidate.indexOf('{');
-  const end = candidate.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('no JSON object found in reply');
-  }
-  return JSON.parse(candidate.slice(start, end + 1)) as T;
-}
+import { extractJson } from '@/utils/jsonExtract';
+
+export { extractJson } from '@/utils/jsonExtract';
 
 /* ------------------------------------------------------------------ */
 /* Session memory (in-app replacement of server-side opencode sessions) */

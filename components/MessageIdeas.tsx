@@ -4,15 +4,24 @@ import { typography, FontWeights } from '@/theme/typography';
 import { withAlpha } from '@/theme/colors';
 import { useI18n } from '@/i18n/provider';
 
-const Page = ({ onSelectCard }: { onSelectCard: (message: string) => void }) => {
+const Page = ({
+  onSelectCard,
+  customIdeas,
+}: {
+  onSelectCard: (message: string) => void;
+  customIdeas?: Array<{ title: string; text: string }>;
+}) => {
   const { colors } = useTheme();
   const { t } = useI18n();
 
-  const PredefinedMessages = [
-    { title: t('chat.idea1Title'), text: t('chat.idea1Text') },
-    { title: t('chat.idea2Title'), text: t('chat.idea2Text') },
-    { title: t('chat.idea3Title'), text: t('chat.idea3Text') },
-  ];
+  const PredefinedMessages =
+    customIdeas && customIdeas.length > 0
+      ? customIdeas
+      : [
+          { title: t('chat.idea1Title'), text: t('chat.idea1Text') },
+          { title: t('chat.idea2Title'), text: t('chat.idea2Text') },
+          { title: t('chat.idea3Title'), text: t('chat.idea3Text') },
+        ];
 
   return (
     <View>

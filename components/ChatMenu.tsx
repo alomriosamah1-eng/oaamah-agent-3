@@ -10,7 +10,6 @@ import { getChats, renameChat } from '@/utils/Database';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Chat } from '@/utils/Interfaces';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeIn, FadeOut, SlideInLeft, SlideOutLeft } from 'react-native-reanimated';
 
 export const ChatMenu = ({ onClose }: { onClose: () => void }) => {
   const { colors } = useTheme();
@@ -27,6 +26,11 @@ export const ChatMenu = ({ onClose }: { onClose: () => void }) => {
   const navigate = (href: Parameters<typeof router.push>[0]) => {
     onClose();
     router.push(href);
+  };
+
+  const newChat = () => {
+    onClose();
+    router.replace('/chat');
   };
 
   const onDeleteChat = (chatId: number) => {
@@ -54,12 +58,8 @@ export const ChatMenu = ({ onClose }: { onClose: () => void }) => {
 
   return (
     <>
-      <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(200)}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-      </Animated.View>
-      <Animated.View
-        entering={SlideInLeft.springify()}
-        exiting={SlideOutLeft.springify()}
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <View
         style={[styles.panel, { paddingTop: top + 8, paddingBottom: bottom + 8, backgroundColor: colors.background }]}>
         <View style={styles.panelHeader}>
           <View style={[styles.panelLogo, { backgroundColor: '#000', borderColor: withAlpha(colors.outline, 0.4) }]}>
@@ -74,7 +74,7 @@ export const ChatMenu = ({ onClose }: { onClose: () => void }) => {
 
         <TouchableOpacity
           style={[styles.newChat, { borderColor: withAlpha(colors.outline, 0.2) }]}
-          onPress={() => navigate('/chat')}>
+          onPress={newChat}>
           <MaterialIcons name="edit" size={20} color={colors.primary} />
           <Text style={[styles.newChatText, { color: colors.onSurface }]}>{t('chat.newChat')}</Text>
         </TouchableOpacity>
@@ -109,7 +109,7 @@ export const ChatMenu = ({ onClose }: { onClose: () => void }) => {
           </View>
           <Text style={[styles.panelItemText, { color: colors.onSurface }]}>{t('home.settings')}</Text>
         </TouchableOpacity>
-      </Animated.View>
+      </View>
     </>
   );
 };
@@ -208,8 +208,8 @@ export const ChatMenuHost = ({
   onClose: () => void;
 }) => {
   return (
-    <Modal visible={menuOpen} transparent animationType="none" onRequestClose={onClose}>
-      {menuOpen && <ChatMenu onClose={onClose} />}
-    </Modal>
+<Modal visible={menuOpen} transparent animationType="fade" onRequestClose={onClose}>
+    {menuOpen && <ChatMenu onClose={onClose} />}
+  </Modal>
   );
 };

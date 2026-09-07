@@ -1,23 +1,17 @@
-// React binding of the VoiceEngine: wires the engine events up to React state
-// and the orb's amplitude/band shared values, and provides the concrete
-// player/audio implementation (expo-audio) the engine needs. The panel renders
-// exclusively from what this hook exposes.
+// React binding of the conversation loop: wires its events up to React state,
+// the orb's amplitude shared values, and the concrete expo-audio player the
+// loop needs for speech output. The orb renders exclusively from here.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSharedValue } from 'react-native-reanimated';
-import {
-  useAudioPlayer,
-  useAudioPlayerStatus,
-  useAudioSampleListener,
-  setAudioModeAsync,
-} from 'expo-audio';
+import { Alert, Linking } from 'react-native';
+import { useAudioPlayer, useAudioPlayerStatus, useAudioSampleListener, setAudioModeAsync } from 'expo-audio';
 import { agentMessageStream, getSelectedZenModel } from '@/utils/OpenCodeAgent';
 import { useVoiceLevels } from '@/utils/orbs/useVoiceLevels';
-import { VoiceEngine, VoicePhase, VoiceEngineEvent } from './engine';
-import { createVoiceRouter, describeRoute } from './providers/router';
-import { deviceSttProvider, deviceSttAvailable, cloudSttProvider } from './stt';
+import { useI18n } from '@/i18n/provider';
+import { Conversation, VoicePhase, ConversationEvent } from './conversation';
+import { createRecognizer, MIC_PERMISSION_BLOCKED, MIC_PERMISSION_DENIED } from './recognition';
+import { speak, type SpeechAudio } from './speech';
 import { DEFAULT_VOICE_CONFIG, loadVoiceConfig, saveVoiceConfig, VoiceConfig } from './config';
-import { voiceLog } from './log';
 
 export interface Turn {
   role: 'user' | 'agent';
@@ -34,9 +28,7 @@ export interface UseVoiceControllerResult {
   config: VoiceConfig;
   updateConfig: (patch: Partial<VoiceConfig>) => Promise<void>;
   providerLine: string;
-  /** True when running in Expo Go with no off-device recognizer and no
-   *  gateway configured — the mic cannot transcribe until `voiceGatewayUrl`
-   *  is set (or a dev/preview build is used). */
+  /** True when the gateway STT can't be reached — the mic cannot transcribe. */
   sttNeedsGateway: boolean;
   /** Orb inputs — pass straight to <VoiceOrb inputAmplitude/outputLevels>. */
   micLevel: ReturnType<typeof useVoiceLevels>;
@@ -61,15 +53,14 @@ export function useVoiceController(): UseVoiceControllerResult {
   continuousRef.current = continuous;
 
   const [providerLine, setProviderLine] = useState('');
-  const [sttNeedsGateway, setSttNeedsGateway] = useState(() => deviceSttAvailable === false);
+  const [sttNeedsGateway, setSttNeedsGateway] = useState(false);
 
   // Orb inputs.
   const micLevel = useVoiceLevels();
   const outputLevels = useVoiceLevels();
-  const micBoost = useSharedValue(false);
 
   // Concrete expo-audio player + a live ref so never-stale status is readable
-  // from async closures created once at engine construction.
+  // from async closures created once at conversation construction.
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
   const playerStatusRef = useRef(playerStatus);
@@ -81,48 +72,72 @@ export function useVoiceController(): UseVoiceControllerResult {
     if (frames && frames.length) outputLevels.setSamples(frames, 16_000);
   });
 
-  /* --------------------------- engine creation -------------------------- */
+  /* -------------------------- conversation binding ----------------------- */
 
-  const engineRef = useRef<VoiceEngine | null>(null);
+  const conversationRef = useRef<Conversation | null>(null);
 
-  const routeEngineEvent = useCallback(
-    (event: VoiceEngineEvent) => {
-      switch (event.type) {
-        case 'phase':
-          setPhase(event.phase);
-          break;
-        case 'partial':
-          setPartial(event.text);
-          break;
-        case 'diag':
-          setDiag(event.text);
-          break;
-        case 'turn':
-          setTurns((prev) => [...prev, { role: event.role, text: event.text }]);
-          if (event.role === 'agent') setPartial('');
-          break;
-        case 'error':
-          setLastError(event.message);
-          setDiag(event.message ? `error: ${event.message}` : '');
-          break;
-        case 'stt-volume':
-          // Drive the orb with a live meter while listening.
-          micBoost.value = event.level > 0.1;
-          micLevel.setSamples([event.level]);
-          break;
-        default:
-          break;
+  // `t` is captured here so the per-instance event callback (built once, when
+  // the conversation is constructed) can look up strings without going stale.
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  const routeEvent = useCallback((event: ConversationEvent) => {
+    switch (event.type) {
+      case 'phase':
+        setPhase(event.phase);
+        if (event.phase === 'listening') setDiag('');
+        break;
+      case 'partial':
+        setPartial(event.text);
+        break;
+      case 'diag':
+        setDiag(event.text);
+        break;
+      case 'turn':
+        setTurns((prev) => [...prev, { role: event.role, text: event.text }]);
+        if (event.role === 'agent') setPartial('');
+        break;
+      case 'error': {
+        const msg = event.message;
+        setLastError(msg);
+        setDiag(msg ? `error: ${msg}` : '');
+        if (msg === MIC_PERMISSION_BLOCKED) {
+          // "Never ask again" — the dialog can't re-open; the user must toggle
+          // the permission in system settings.
+          Alert.alert(
+            tRef.current('voice.micBlockedTitle'),
+            tRef.current('voice.micBlockedBody'),
+            [
+              { text: tRef.current('voice.cancel'), style: 'cancel' },
+              { text: tRef.current('voice.openSettings'), onPress: () => Linking.openSettings().catch(() => {}) },
+            ],
+          );
+        } else if (msg === MIC_PERMISSION_DENIED) {
+          Alert.alert(
+            tRef.current('voice.micDeniedTitle'),
+            tRef.current('voice.micDeniedBody'),
+            [
+              { text: tRef.current('voice.cancel'), style: 'cancel' },
+              { text: tRef.current('voice.openSettings'), onPress: () => Linking.openSettings().catch(() => {}) },
+              { text: tRef.current('voice.micRetry'), onPress: () => conversationRef.current?.startListening() },
+            ],
+          );
+        }
+        break;
       }
-    },
-    [micBoost, micLevel],
-  );
+      default:
+        break;
+    }
+  }, []);
 
-  if (!engineRef.current) {
+  if (!conversationRef.current) {
     const play = (uri: string): Promise<void> =>
       new Promise((resolve) => {
         const deadline = Date.now() + 20_000;
         setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).finally(() => {
           try {
+            player.volume = configRef.current.volume;
             player.replace({ uri });
             player.play();
           } catch {
@@ -132,7 +147,7 @@ export function useVoiceController(): UseVoiceControllerResult {
           let started = false;
           const poll = () => {
             const s = playerStatusRef.current;
-            if (engineRef.current?.getPhase() !== 'speaking') {
+            if (conversationRef.current?.getPhase() !== 'speaking') {
               resolve();
               return;
             }
@@ -152,34 +167,33 @@ export function useVoiceController(): UseVoiceControllerResult {
         });
       });
 
-    const engine = new VoiceEngine({
+    const speechAudio: SpeechAudio = {
+      play,
+      setVolume: (v) => {
+        try {
+          player.volume = v;
+        } catch {}
+      },
+      stop: () => {
+        try {
+          player.pause();
+        } catch {}
+      },
+    };
+
+    const conversation = new Conversation({
       config: () => configRef.current,
       continuous: () => continuousRef.current,
-      providers: {
-        // Expo Go cannot run the on-device recognizer (native module not
-        // bundled there) — fall back to gateway STT, which records with
-        // expo-audio and transcribes through the voice gateway.
-        stt: deviceSttAvailable ? deviceSttProvider : cloudSttProvider,
-        tts: createVoiceRouter(),
-      },
-      audio: {
-        play,
-        setVolume: (v) => {
-          try {
-            player.volume = v;
-          } catch {}
-        },
-        stop: () => {
-          try {
-            player.pause();
-          } catch {}
-        },
-      },
+      // Desktop echo suppression: keep the mic muted 1.5s after speaking so
+      // the reply doesn't echo back into a new turn.
+      echoCooldownMs: 1500,
+      recorder: createRecognizer(),
       agent: agentMessageStream,
+      speak: (text, signal) => speak(text, configRef.current, speechAudio, { signal }),
+      onEvent: routeEvent,
       getModel: () => getSelectedZenModel(),
-      onEvent: routeEngineEvent,
     });
-    engineRef.current = engine;
+    conversationRef.current = conversation;
   }
 
   /* --------------------------- lifecycle effects ------------------------ */
@@ -191,21 +205,21 @@ export function useVoiceController(): UseVoiceControllerResult {
       if (cancelled) return;
       configRef.current = cfg;
       setConfig(cfg);
-      engineRef.current?.setVolume(cfg.volume);
-      const line = await describeRoute(cfg.mode).catch(() => '');
-      if (!cancelled) setProviderLine(line);
-      // If we're on the gateway STT path, confirm a gateway is actually set.
-      if (!cancelled && deviceSttAvailable === false) {
-        const { isVoiceGatewayConfigured } = await import('./providers/gateway').catch(() => ({
-          isVoiceGatewayConfigured: () => false,
-        }));
-        if (!isVoiceGatewayConfigured()) setSttNeedsGateway(true);
-        else setSttNeedsGateway(false);
-      }
+      const { gatewayStatus } = await import('./providers/gateway').catch(() => ({
+        gatewayStatus: async () => false,
+      }));
+      if (cancelled) return;
+      const reachable = await gatewayStatus().catch(() => false);
+      setSttNeedsGateway(!reachable);
+      setProviderLine(
+        reachable
+          ? 'edge-tts:on · google-stt:on · fallback:native'
+          : 'edge-tts:off · google-stt:off · fallback:native',
+      );
     })();
     return () => {
       cancelled = true;
-      engineRef.current?.stop();
+      conversationRef.current?.stop();
       try {
         player.remove();
       } catch {}
@@ -215,43 +229,43 @@ export function useVoiceController(): UseVoiceControllerResult {
 
   /* ------------------------------- actions ------------------------------ */
 
+  /** Begin the conversation loop (idle → listen). */
   const start = useCallback(() => {
     setLastError('');
     setDiag('');
-    void engineRef.current?.startListening();
+    conversationRef.current?.startListening();
   }, []);
 
+  /** End the whole conversation session (any active phase). */
   const stop = useCallback(() => {
-    engineRef.current?.stop();
+    conversationRef.current?.stop();
     micLevel.reset();
     outputLevels.reset();
     setDiag('');
   }, [micLevel, outputLevels]);
 
+  /**
+   * The orb is the conversation's switch: idle → start, anything active →
+   * stop. Utterances end by themselves through the VAD silence gate, so a
+   * second press is never "finish talking" — it is a real stop.
+   */
   const toggle = useCallback(() => {
-    const e = engineRef.current;
-    if (!e) return;
-    if (e.getPhase() === 'listening') {
-      void e.finishListening();
-      voiceLog('VOICE_START', 'finish-listening');
-    } else if (e.getPhase() === 'idle') {
-      setLastError('');
-      void e.startListening();
+    const c = conversationRef.current;
+    if (!c) return;
+    if (c.getPhase() === 'idle') {
+      start();
     } else {
-      e.stop();
+      stop();
     }
-  }, []);
+  }, [start, stop]);
 
   const updateConfig = useCallback(
     async (patch: Partial<VoiceConfig>) => {
       const next = { ...configRef.current, ...patch };
       configRef.current = next;
       setConfig(next);
-      engineRef.current?.setVolume(next.volume);
       try {
         await saveVoiceConfig(next);
-        const line = await describeRoute(next.mode).catch(() => '');
-        setProviderLine(line);
       } catch {}
     },
     [],

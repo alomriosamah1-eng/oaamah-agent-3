@@ -10,10 +10,14 @@ import MessageIdeas from '@/components/MessageIdeas';
 import { addChat, addMessage, getMessages } from '@/utils/Database';
 import { useSQLiteContext } from 'expo-sqlite';
 import { buildHistoryPrompt } from '@/utils/Opencode';
-import { AgentUnavailableError, chatStream, getSelectedZenModel, OSAMAH_SYSTEM } from '@/utils/OpenCodeAgent';
-import { archiveToServer, messagesToMarkdown, saveMarkdownAsPdf } from '@/utils/Pdf';
+import { AgentUnavailableError, chatComplete, chatStream, getSelectedZenModel, OSAMAH_SYSTEM } from '@/utils/OpenCodeAgent';
+import { BrandNavTitle } from '@/components/BrandNavTitle';
+import { archiveToServer, cleanChatMessages, saveConversationAsPdf, saveConversationAsLongPdf, messagesToMarkdown } from '@/utils/Pdf';
 import { addSavedFile } from '@/utils/savedFiles';
 import { TaskLevel, taskLevelDirective } from '@/utils/taskLevel';
+import { isComplexTask, executeTask } from '@/utils/TaskOrchestrator';
+import { isLongDocRequest } from '@/utils/longDocument';
+import { buildProfileContext, loadProfile } from '@/utils/UserProfile';
 import * as Speech from 'expo-speech';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
@@ -22,6 +26,11 @@ import { typography, FontWeights } from '@/theme/typography';
 import { useI18n } from '@/i18n/provider';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const isPdfRequest = (text: string) => {
+  const t = text.toLowerCase();
+  return t.includes('pdf') || t.includes('مستند') || t.includes('تصدير');
+};
 
 const ChatPage = () => {
   const { colors } = useTheme();
@@ -47,6 +56,14 @@ const ChatPage = () => {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // Profile context — loaded once, rebuilt on return to chat
+  const [profileContext, setProfileContext] = useState('');
+  useEffect(() => {
+    loadProfile().then((p) => {
+      setProfileContext(buildProfileContext(p, 'ar') ?? '');
+    });
+  }, [id]);
+
   useEffect(() => {
     if (id) {
       getMessages(db, parseInt(id)).then((res) => {
@@ -65,6 +82,203 @@ const ChatPage = () => {
     const { height } = event.nativeEvent.layout;
     setHeight(height / 2);
   };
+
+  // ------------------------------------------------------------------
+  // Shared helpers
+  // ------------------------------------------------------------------
+
+  const patchLastBot = (content: string) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      next[next.length - 1] = { ...last, content };
+      return next;
+    });
+  };
+
+  const removeEmptyBot = () => {
+    setMessages((prev) => prev.filter((m) => !(m.role === Role.Bot && m.content === '')));
+  };
+
+  const stripOrchestratorStatus = (text: string): string => {
+    return text.replace(/^✂️\s*\n?/, '').trim();
+  };
+
+  const buildSystem = (directive: string): string => {
+    const parts = [OSAMAH_SYSTEM];
+    if (profileContext) {
+      parts.push(
+        `User profile context (use selectively only when it genuinely adds value — for greetings, tailoring examples, or adjusting complexity; ignore when irrelevant):\n${profileContext}`,
+      );
+    }
+    if (directive) {
+      parts.push(directive);
+    }
+    return parts.join('\n\n');
+  };
+
+  // ------------------------------------------------------------------
+  // Simple chat (chatStream with streaming)
+  // ------------------------------------------------------------------
+
+  const runSimpleChat = async (text: string, directive: string, abort: AbortController) => {
+    const history = messagesRef.current.filter((m) => m.content && m.content.trim() !== '');
+    const effectivePrompt = directive ? `${directive}\n\n${text}` : text;
+    const prompt = buildHistoryPrompt(history, effectivePrompt);
+    const speakOutput = await storage.getString(SPEAK_OUTPUT_KEY);
+    const model = await getSelectedZenModel();
+
+    const reply = await chatStream(
+      {
+        system: buildSystem(directive),
+        user: prompt,
+        chain: model ? [model] : undefined,
+        sessionKey: id ? `chat-${id}` : 'agent',
+        onDelta: (delta) => patchLastBot(delta),
+      },
+      abort.signal,
+    );
+
+    if (reply && chatIdRef.current) {
+      await addMessage(db, parseInt(chatIdRef.current), { content: reply, role: Role.Bot });
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { ...last, content: reply };
+        return next;
+      });
+      if (speakOutput === 'true' || speakOutput === '1') {
+        Speech.stop();
+        Speech.speak(reply.replace(/\s+/g, ' ').trim(), { language: 'ar-SA', rate: 1 });
+      }
+    } else {
+      removeEmptyBot();
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // Complex task orchestration (runs llm calls sequentially, short status)
+  // ------------------------------------------------------------------
+
+  const runOrchestrator = async (text: string, abort: AbortController) => {
+    const model = await getSelectedZenModel();
+    patchLastBot(t('orchestration.planning'));
+
+    const llm: typeof chatComplete = (args, signal) => {
+      return chatComplete(
+        {
+          system: args.system,
+          user: args.user,
+          temperature: args.temperature,
+          maxTokens: args.maxTokens,
+          model: args.model ?? model,
+          sessionKey: id ? `task-${id}` : 'task',
+        },
+        signal,
+      );
+    };
+
+    const result = await executeTask(
+      text,
+      {
+        signal: abort.signal,
+        model,
+        profileContext,
+        onPhase: (_phase, statusText) => {
+          if (statusText) patchLastBot(statusText);
+        },
+      },
+      { llm },
+    );
+
+    const finalContent = stripOrchestratorStatus(result.finalResult);
+    patchLastBot(finalContent);
+
+    if (chatIdRef.current) {
+      await addMessage(db, parseInt(chatIdRef.current), { content: finalContent, role: Role.Bot });
+    }
+
+    const speakOutput = await storage.getString(SPEAK_OUTPUT_KEY);
+    if (speakOutput === 'true' || speakOutput === '1') {
+      Speech.stop();
+      Speech.speak(finalContent.replace(/\s+/g, ' ').trim(), { language: 'ar-SA', rate: 1 });
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // PDF agent flow (organize content → structured doc → PDF → save)
+  // ------------------------------------------------------------------
+
+  const runPdfAgent = async (text: string, abort: AbortController) => {
+    patchLastBot(t('pdfDoc.organizing'));
+    const lang = text.match(/[\u0600-\u06FF]/) ? 'ar' : 'en';
+    const title = `${t('appName')} — ${new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}`;
+
+    // Pass current conversation to the agent for organization
+    const chatRows = messagesRef.current
+      .filter((m) => m.content && m.content.trim() !== '')
+      .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
+
+    const uri = await saveConversationAsPdf(
+      chatRows,
+      {
+        title,
+        lang,
+        mode: 'dark',
+        model: await getSelectedZenModel(),
+        signal: abort.signal,
+        onStatus: (_phase, label) => {
+          if (label) patchLastBot(label);
+        },
+      },
+    );
+
+    await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
+    await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
+
+    patchLastBot(t('pdfDoc.done'));
+  };
+
+  // Long-form PDF agent — same flow as runPdfAgent but builds a sectioned
+  // long document (scales to 100/500/1000+ pages) via saveConversationAsLongPdf.
+  const runLongPdfAgent = async (text: string, abort: AbortController) => {
+    patchLastBot(t('pdfDoc.organizing'));
+    const lang = text.match(/[\u0600-\u06FF]/) ? 'ar' : 'en';
+    const title = `${t('appName')} — ${new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}`;
+
+    const chatRows = messagesRef.current
+      .filter((m) => m.content && m.content.trim() !== '')
+      .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
+
+    const uri = await saveConversationAsLongPdf(
+      chatRows,
+      {
+        title,
+        lang,
+        mode: 'dark',
+        model: await getSelectedZenModel(),
+        signal: abort.signal,
+        onStatus: (_phase, label, current, total) => {
+          if (label) {
+            patchLastBot(
+              total && current
+                ? `${label} ${current}/${total}`
+                : label,
+            );
+          }
+        },
+      },
+    );
+
+    await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
+    await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
+
+    patchLastBot(t('pdfDoc.done'));
+  };
+
+  // ------------------------------------------------------------------
+  // Main send handler
+  // ------------------------------------------------------------------
 
   const onShouldSend = async (text: string, taskType?: TaskLevel) => {
     const trimmed = text.trim();
@@ -89,55 +303,22 @@ const ChatPage = () => {
       Alert.alert(t('chat.saveErrorTitle'), t('chat.saveErrorBody'));
     }
 
-    const history = messagesRef.current.filter((m) => m.content && m.content.trim() !== '');
-    const directive = taskType ? taskLevelDirective(taskType) : '';
-    // Task type is a frontend layer — the prompt the agent receives now
-    // carries the requested depth before the actual user text.
-    const effectivePrompt = directive ? `${directive}\n\n${trimmed}` : trimmed;
-    const prompt = buildHistoryPrompt(history, effectivePrompt);
-
     const abort = new AbortController();
     abortRef.current = abort;
 
-    const patchAssistant = (patch: string) => {
-      setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        next[next.length - 1] = { ...last, content: `${last.content}${patch}` };
-        return next;
-      });
-    };
+    const directive = taskType ? taskLevelDirective(taskType) : '';
 
     try {
-      const speakOutput = await storage.getString(SPEAK_OUTPUT_KEY);
-      const model = await getSelectedZenModel();
-      const reply = await chatStream(
-        {
-          system: OSAMAH_SYSTEM,
-          user: prompt,
-          chain: model ? [model] : undefined,
-          onDelta: (delta) => patchAssistant(delta),
-        },
-        abort.signal,
-      );
-
-      if (reply && chatIdRef.current) {
-        await addMessage(db, parseInt(chatIdRef.current), { content: reply, role: Role.Bot });
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          next[next.length - 1] = { ...last, content: reply };
-          return next;
-        });
-        if (speakOutput === 'true' || speakOutput === '1') {
-          Speech.stop();
-          Speech.speak(reply.replace(/\s+/g, ' ').trim(), {
-            language: 'ar-SA',
-            rate: 1,
-          });
+      if (isPdfRequest(trimmed)) {
+        if (isLongDocRequest(trimmed)) {
+          await runLongPdfAgent(trimmed, abort);
+        } else {
+          await runPdfAgent(trimmed, abort);
         }
+      } else if (isComplexTask(trimmed)) {
+        await runOrchestrator(trimmed, abort);
       } else {
-        setMessages((prev) => prev.filter((m) => !(m.role === Role.Bot && m.content === '')));
+        await runSimpleChat(trimmed, directive, abort);
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
@@ -146,12 +327,16 @@ const ChatPage = () => {
           ? t('chat.errorBody')
           : `${err?.message ?? err}`;
       Alert.alert(t('chat.errorTitle'), message);
-      setMessages((prev) => prev.filter((m) => !(m.role === Role.Bot && m.content === '')));
+      removeEmptyBot();
     } finally {
       abortRef.current = null;
       setIsSending(false);
     }
   };
+
+  // ------------------------------------------------------------------
+  // Header PDF button — routes to the agent for current session
+  // ------------------------------------------------------------------
 
   const [isPdfBusy, setIsPdfBusy] = useState(false);
   const isPdfBusyRef = useRef(false);
@@ -161,17 +346,29 @@ const ChatPage = () => {
     if (rows.length === 0) return;
     isPdfBusyRef.current = true;
     setIsPdfBusy(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
-      const markdown = messagesToMarkdown(rows);
+      const chatRows = rows
+        .filter((m) => m.content && m.content.trim() !== '')
+        .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
+
+      const lang = 'ar';
       const title = `${t('appName')} — ${new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}`;
-      const uri = await saveMarkdownAsPdf(markdown, title);
-      // Register the exported PDF in Saved Files (Tools) so the artifact is
-      // kept in a persistent app directory, not lost in the OS cache.
+
+      const uri = await saveConversationAsPdf(chatRows, {
+        title,
+        lang,
+        mode: 'dark',
+        signal: abort.signal,
+      });
       await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
-      await archiveToServer(title, markdown);
+      await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       Alert.alert(t('chat.pdfErrorTitle'), `${t('chat.pdfErrorBody')}: ${err?.message ?? err}`);
     } finally {
+      abortRef.current = null;
       isPdfBusyRef.current = false;
       setIsPdfBusy(false);
     }
@@ -183,11 +380,7 @@ const ChatPage = () => {
     <View style={[styles.page, { backgroundColor: colors.background }]}>
       <Stack.Screen
         options={{
-          headerTitle: () => (
-            <Text style={{ color: colors.onBackground, ...(typography.titleMedium as any), fontWeight: FontWeights.bold }}>
-              {t('appName')}
-            </Text>
-          ),
+          headerTitle: () => <BrandNavTitle suffix="AI" />,
           headerRight: () => (
             <Pressable
               onPress={onSharePdf}

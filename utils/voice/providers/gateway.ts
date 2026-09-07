@@ -17,15 +17,29 @@ import Constants from 'expo-constants';
 
 /**
  * Resolve the voice gateway endpoint. Priority:
- *   1. `EXPO_PUBLIC_VOICE_GATEWAY_URL` in `.env` (per-machine override — the
- *      professional way to point the app at a gateway on another network),
- *   2. `extra.voiceGatewayUrl` baked into `app.json`.
+ *   1. `EXPO_PUBLIC_VOICE_GATEWAY_URL` in `.env` (explicit override — the
+ *      only way to point at a gateway not colocated with Metro),
+ *   2. the Metro host (Expo Go / dev) — the machine serving the bundle is
+ *      also where `server/voice_gateway.py` runs, so `hostUri` is
+ *      auto-discovered and voice works with zero configuration on the same
+ *      Wi-Fi. This wins over any baked-in IP because the baked IP goes stale
+ *      the moment the machine's DHCP lease changes,
+ *   3. `extra.voiceGatewayUrl` baked into `app.json` (production builds,
+ *      where there is no Metro host).
  * The path is appended at the call sites (`/voice/tts`, `/voice/status`,
  * `/voice/transcribe`), matching the protocol served by `server/voice_gateway.py`.
  */
 export function voiceGatewayUrl(): string {
   const fromEnv = (process.env.EXPO_PUBLIC_VOICE_GATEWAY_URL ?? '').trim();
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
+  // Metro host: "192.168.1.50:8081" → "http://192.168.1.50:8100". Expo Go
+  // reliably exposes it as `expoConfig.hostUri`; `expoGoConfig.debuggerHost`
+  // is the classic fallback for older manifests.
+  const hostUri =
+    (Constants.expoConfig?.hostUri ?? '').trim() ||
+    ((Constants.expoGoConfig as { debuggerHost?: string | null } | null)?.debuggerHost ?? '').trim();
+  const host = hostUri.split(':')[0];
+  if (host) return `http://${host}:8100`;
   const extra = Constants.expoConfig?.extra as { voiceGatewayUrl?: string } | undefined;
   return (extra?.voiceGatewayUrl ?? '').trim().replace(/\/+$/, '');
 }

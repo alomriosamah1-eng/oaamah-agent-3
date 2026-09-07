@@ -19,7 +19,9 @@ const TabsLayout = () => {
         }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="chat" options={{ headerShown: false }} />
+        <Stack.Screen name="flow" options={{ headerShown: false }} />
         <Stack.Screen name="tools" options={{ headerShown: false }} />
+        <Stack.Screen name="promptMaker" options={{ headerShown: true }} />
         <Stack.Screen name="saved" options={{ headerShown: false }} />
         <Stack.Screen name="settings" options={{ headerShown: false }} />
       </Stack>

@@ -158,7 +158,10 @@ async def _transcribe_bytes(audio: bytes) -> str:
         data = flac.read_bytes()
 
     loop = asyncio.get_running_loop()
-    for lang in ("ar-SA", "ar", "auto"):
+    # Same chain as the desktop assistant: Arabic first (Yemeni MSA read),
+    # then the auto-fallback languages, and English last so English speech
+    # still lands.
+    for lang in ("ar-YE", "ar-SA", "ar", "en-US"):
         for _attempt in range(3):
             text = await loop.run_in_executor(None, _google_transcribe, data, lang)
             if text:

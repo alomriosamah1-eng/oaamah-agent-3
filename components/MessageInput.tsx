@@ -18,14 +18,7 @@ import { withAlpha } from '@/theme/colors';
 import { useI18n } from '@/i18n/provider';
 import { TaskTypeSelector } from '@/components/TaskTypeSelector';
 import { TaskLevel } from '@/utils/taskLevel';
-
-let voiceAvailable = true;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  require('@react-native-voice/voice');
-} catch {
-  voiceAvailable = false;
-}
+import { recordOneShot } from '@/utils/voice/recognition';
 
 const MessageInput = ({
   onShouldSend,
@@ -41,6 +34,7 @@ const MessageInput = ({
   const [showMic, setShowMic] = useState(false);
   const [listening, setListening] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const dictRef = useRef<{ cancel: () => void } | null>(null);
 
   const send = async () => {
     if (text.length < 1) return;
@@ -50,28 +44,29 @@ const MessageInput = ({
   };
 
   const micPressed = async () => {
-    if (!voiceAvailable) {
+    // Desktop-method dictation: records with the energy VAD and transcribes
+    // through the voice gateway (Google). Tap again to cancel early.
+    const one = recordOneShot('ar-SY');
+    if (!one) {
       Alert.alert(t('chat.voiceUnavailableTitle'), t('chat.voiceUnavailableBody'));
       return;
     }
-    const Voice = require('@react-native-voice/voice').default;
-    Voice.onSpeechResults = (result: any) => {
-      const spokenText = result.value?.[0] ?? '';
-      setText(spokenText);
-      setShowMic(false);
-    };
+    dictRef.current = one;
+    setListening(true);
     try {
-      await Voice.start('en-US');
-      setListening(true);
-    } catch (e) {
+      const spoken = await one.result;
+      if (spoken) setText(spoken);
+    } catch {
       Alert.alert(t('chat.voiceErrorTitle'), t('chat.voiceErrorBody'));
+    } finally {
       setListening(false);
+      dictRef.current = null;
     }
   };
 
-  const micReleased = async () => {
-    const Voice = require('@react-native-voice/voice').default;
-    Voice.stop();
+  const micReleased = () => {
+    dictRef.current?.cancel();
+    dictRef.current = null;
     setListening(false);
   };
 
@@ -88,9 +83,10 @@ const MessageInput = ({
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              onLongPress={micPressed}
-              onPressOut={micReleased}
-              delayLongPress={150}
+              onPress={() => {
+                if (listening) micReleased();
+                else void micPressed();
+              }}
               activeOpacity={0.7}
               style={[styles.buttonMic, { borderColor: withAlpha(colors.outline, 0.3) }]}>
               <Ionicons name={listening ? 'stop' : 'mic'} size={22} color={colors.onSurface} />

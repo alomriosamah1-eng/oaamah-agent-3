@@ -9,11 +9,11 @@ import { useI18n } from '@/i18n/provider';
 
 export const TAB_BAR_HEIGHT = 66;
 
-export type TabKey = 'home' | 'chat' | 'tools' | 'settings';
+export type TabKey = 'home' | 'chat' | 'flow' | 'tools' | 'settings';
 
 interface TabDef {
   key: TabKey;
-  labelKey: 'tabs.home' | 'tabs.chat' | 'tabs.tools' | 'tabs.settings';
+  labelKey: 'tabs.home' | 'tabs.chat' | 'tabs.flow' | 'tabs.tools' | 'tabs.settings';
   icon: keyof typeof MaterialIcons.glyphMap;
   activeIcon: keyof typeof MaterialIcons.glyphMap;
 }
@@ -21,6 +21,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { key: 'home', labelKey: 'tabs.home', icon: 'home', activeIcon: 'home' },
   { key: 'chat', labelKey: 'tabs.chat', icon: 'chat-bubble-outline', activeIcon: 'chat-bubble' },
+  { key: 'flow', labelKey: 'tabs.flow', icon: 'play-circle-outline', activeIcon: 'play-circle' },
   { key: 'tools', labelKey: 'tabs.tools', icon: 'construction', activeIcon: 'construction' },
   { key: 'settings', labelKey: 'tabs.settings', icon: 'settings', activeIcon: 'settings' },
 ];
@@ -28,6 +29,7 @@ const TABS: TabDef[] = [
 const TARGET = {
   home: '/',
   chat: '/chat',
+  flow: '/flow',
   tools: '/tools',
   settings: '/settings',
 } as const;
@@ -36,7 +38,8 @@ export function useActiveTab(): TabKey {
   const pathname = usePathname();
   if (pathname === '/') return 'home';
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat';
-  if (pathname === '/tools') return 'tools';
+  if (pathname === '/flow' || pathname.startsWith('/flow/')) return 'flow';
+  if (pathname === '/tools' || pathname.startsWith('/promptMaker')) return 'tools';
   if (pathname === '/saved') return 'chat';
   if (pathname === '/settings' || pathname.startsWith('/settings/')) return 'settings';
   return 'home';
