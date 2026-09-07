@@ -248,6 +248,92 @@ export const sendMessage = async (
   return textParts.trim();
 };
 
+// Stream an assistant reply as it is written. The message POST resolves only
+// when the reply is complete, while `GET /event` (SSE) carries incremental
+// `message.part.updated` frames whose `part.text` grows until completion —
+// we emit only the new tail through onDelta so the UI types out live.
+export const streamMessage = async (
+  sessionId: string,
+  text: string,
+  opts: { signal?: AbortSignal; onDelta?: (delta: string) => void } = {}
+): Promise<string> => {
+  const base = await resolveServer(opts.signal);
+  const ctrl = new AbortController();
+  opts.signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
+
+  let last = '';
+  let streamError: unknown = null;
+
+  const eventRes = await expoFetch(`${base}/event`, {
+    headers: { Accept: 'text/event-stream' },
+    signal: ctrl.signal,
+  }).catch(() => null);
+
+  const pumpEvents = (async () => {
+    if (!eventRes || !eventRes.ok || !eventRes.body) return;
+    const reader = eventRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = frame.split('\n').find((l) => l.startsWith('data:'));
+          if (!dataLine) continue;
+          let event: any;
+          try {
+            event = JSON.parse(dataLine.slice(5).trim());
+          } catch {
+            continue;
+          }
+          const props = event?.properties;
+          if (props?.sessionID !== sessionId) continue;
+          if (event.type === 'message.part.updated') {
+            const part = props?.part;
+            if (part?.type === 'text' && typeof part.text === 'string' && part.text.length > last.length) {
+              const delta = part.text.slice(last.length);
+              last = part.text;
+              opts.onDelta?.(delta);
+            }
+          } else if (event.type === 'session.error') {
+            streamError = props?.error ?? 'opencode session error';
+          }
+        }
+      }
+    } catch {
+      // connection closed (also happens on abort)
+    }
+  })();
+
+  try {
+    const res = await expoFetch(`${base}/session/${sessionId}/message`, {
+      method: 'POST',
+      headers: await buildHeaders(),
+      signal: ctrl.signal,
+      body: JSON.stringify({ parts: [{ type: 'text', text }] }),
+    });
+    if (!res.ok) throw new Error(await parseError(res, 'opencode message error'));
+    if (streamError) throw new Error(String(streamError));
+    const json: any = await res.json();
+    const textParts = ((json?.parts ?? []) as Array<any>)
+      .filter((p) => (p as any)?.type === 'text' && typeof (p as any).text === 'string')
+      .map((p) => (p as any).text)
+      .join('\n');
+    const reply = textParts.trim();
+    if (!reply) throw new Error('empty opencode server reply');
+    const delta = reply.length > last.length ? reply.slice(last.length) : '';
+    if (delta) opts.onDelta?.(delta);
+    return reply;
+  } finally {
+    ctrl.abort();
+  }
+};
+
 export const abortSession = async (sessionId: string) => {
   try {
     const base = await resolveServer();

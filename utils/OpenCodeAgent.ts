@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import { fetch as streamingFetch } from 'expo/fetch';
 
 import { storage } from '@/utils/Storage';
-import { createSession, resetServerCache, resolveServer, sendMessage } from '@/utils/Opencode';
+import { createSession, resetServerCache, resolveServer, sendMessage, streamMessage } from '@/utils/Opencode';
 
 /**
  * In-app agent engine — the opencode agent runs INSIDE the app.
@@ -56,6 +56,7 @@ async function serverChat(
   sessionKey: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  onDelta?: (delta: string) => void,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -64,7 +65,9 @@ async function serverChat(
     await resolveServer(controller.signal);
     const sessionId = await resolveServerSession(sessionKey, controller.signal);
     const text = system ? `[System instructions]\n${system}\n\n${userPrompt}` : userPrompt;
-    const reply = await sendMessage(sessionId, text, { signal: controller.signal });
+    const reply = onDelta
+      ? await streamMessage(sessionId, text, { signal: controller.signal, onDelta })
+      : await sendMessage(sessionId, text, { signal: controller.signal });
     const trimmed = reply.trim();
     if (!trimmed) throw new Error('empty opencode server reply');
     return trimmed;
@@ -242,7 +245,7 @@ export async function chatStream(
 ): Promise<string> {
   if (useServerFirst(args)) {
     try {
-      const full = await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 240_000, signal);
+      const full = await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 240_000, signal, args.onDelta);
       args.onDelta(full);
       return full;
     } catch (e) {
