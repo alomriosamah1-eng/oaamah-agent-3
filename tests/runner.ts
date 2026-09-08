@@ -13,6 +13,8 @@ const suites = [
   './longDocument.test',
   './apiHub.test',
   './voice-text.test',
+  './voiceKeys.test',
+  './promptArchitect.test',
 ];
 
 let failed = 0;
