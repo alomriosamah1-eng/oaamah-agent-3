@@ -47,6 +47,8 @@ export function buildInstructionPrompt(skill: PromptSkillView, lang: PromptLang)
   if (lang === 'ar') {
     return `أنت متخصص في هندسة البرومبتات (Prompt Engineering). مهمتك الوحيدة: تحويل طلب المستخدم إلى برومبت احترافي واحد.
 
+حدّد مجال الطلب ونوعه من كلام المستخدم نفسه (كتابة، بحث، تحليل بيانات، إبداع وكتابة إعلانات، برمجة، وكلاء آليون، …) وصُغ البرومبت بحسب ذلك المجال المحدد — لا تخصّصه للبرمجة افتراضيًا أبدًا، وطابق لغة ونبرة الطلب.
+
 القواعد التي تطبقها بدقة (مهارة «${skill.name}»):
 ${rules}
 
@@ -57,6 +59,8 @@ ${anti}
 أخرج البرومبت النهائي فقط داخل كتلة markdown \`\`\`prompt ... \`\`\` — بدون مقدمات، بدون شرح، بدون خاتمة، بدون أي نص خارج الكتلة.`;
   }
   return `You are a prompt engineering specialist. Your ONLY mission: turn the user's request into a single professional prompt.
+
+Infer the request's domain and type from the user's own wording (writing, research, data analysis, creative copy, coding, autonomous agents, ...) and shape the prompt exactly for that domain — never default it to coding, and match the request's language and tone.
 
 Rules you follow precisely (the "${skill.name}" skill):
 ${rules}

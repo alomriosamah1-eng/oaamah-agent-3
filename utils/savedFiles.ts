@@ -28,6 +28,8 @@ export interface SavedFileRef {
   createdAt: number;
   /** Source chat id, when the artifact came from a chat message. */
   chatId?: number;
+  /** Companion print HTML (in-app reader preview), as a local file uri. */
+  previewHtml?: string;
 }
 
 const SAVED_FILES_KEY = 'osamah:savedFiles';
@@ -65,7 +67,7 @@ export async function addSavedFile(
   sourceUri: string,
   name: string,
   kind: SavedFileKind,
-  meta: { size?: number; chatId?: number } = {}
+  meta: { size?: number; chatId?: number; previewHtml?: string } = {}
 ): Promise<SavedFileRef> {
   const dir = savedFilesDir();
   const safe = name.replace(/[^\w.\-() ]+/g, '_').trim() || `artifact-${newId()}`;
@@ -78,6 +80,17 @@ export async function addSavedFile(
     // If the copy fails (e.g. the source is a network URL), keep the source
     // URI as-is so the file is still reachable while it exists.
   }
+  let previewHtml: string | undefined;
+  if (meta.previewHtml) {
+    const previewFile = new File(dir, `${safe}.preview.html`);
+    if (previewFile.exists) previewFile.delete();
+    try {
+      previewFile.write(meta.previewHtml);
+      previewHtml = previewFile.uri;
+    } catch {
+      // reader preview is best-effort — the PDF itself still works
+    }
+  }
   const ref: SavedFileRef = {
     id: newId(),
     kind,
@@ -86,6 +99,7 @@ export async function addSavedFile(
     size: meta.size,
     createdAt: Date.now(),
     chatId: meta.chatId,
+    previewHtml,
   };
   const list = await listSavedFiles();
   list.unshift(ref);
@@ -104,6 +118,14 @@ export async function removeSavedFile(id: string): Promise<void> {
       if (file.exists) file.delete();
     } catch {
       // best effort — the registry entry is still removed
+    }
+    if (removed.previewHtml) {
+      try {
+        const preview = new File(removed.previewHtml);
+        if (preview.exists) preview.delete();
+      } catch {
+        // best effort
+      }
     }
   }
   await persist(next);

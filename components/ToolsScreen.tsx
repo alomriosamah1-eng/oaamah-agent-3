@@ -107,8 +107,16 @@ export function ToolsScreen() {
   const docs = files.filter((f) => f.kind === 'pdf');
 
   const openFile = (f: SavedFileRef) => {
-    if (f.kind === 'pdf') shareFile(f);
-    else router.push(`/image/${encodeURIComponent(f.uri)}`);
+    if (f.kind === 'pdf') {
+      router.push({
+        pathname: '/pdf/[uri]',
+        params: {
+          uri: encodeURIComponent(f.uri),
+          ...(f.id ? { id: f.id } : {}),
+          ...(f.previewHtml ? { preview: encodeURIComponent(f.previewHtml) } : {}),
+        },
+      });
+    } else router.push(`/image/${encodeURIComponent(f.uri)}`);
   };
 
   const shareFile = async (f: SavedFileRef) => {

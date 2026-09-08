@@ -11,10 +11,15 @@ const suites = [
   './documentSchema.test',
   './profileModel.test',
   './longDocument.test',
+  './pdfPrint.test',
   './apiHub.test',
   './voice-text.test',
   './voiceKeys.test',
+  './voiceStream.test',
+  './voiceCommands.test',
+  './orbGallery.test',
   './promptArchitect.test',
+  './storageMaintenance.test',
 ];
 
 let failed = 0;

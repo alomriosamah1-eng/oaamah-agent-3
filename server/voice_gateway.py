@@ -58,10 +58,15 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024
 # already carries these exact IDs for azure; edge-tts serves the same Microsoft
 # neural voices, so azure requests just work. Google voice IDs are rewritten to
 # the closest edge neural voice for the locale.
+# So a bilingual reply never swaps person mid-sentence, non-Arabic speech
+# falls back to the SAME gender's English voice rather than a fixed default.
 EDGE_VOICES = {
     "female_ar_sy": "ar-SY-AmanyNeural",
-    "female_ar_sa": "ar-SA-ZariyahNeural",
     "male_ar_sy": "ar-SY-LaithNeural",
+    "female_ar_sa": "ar-SA-ZariyahNeural",
+    "male_ar_sa": "ar-SA-HamedNeural",
+    "female_en": "en-US-AriaNeural",
+    "male_en": "en-US-GuyNeural",
 }
 
 GOOGLE_SPEECH_KEY = "AIzaSyBOti4mM-6x9WDnZIjIeyEU21OpBXqWBgw"
@@ -72,6 +77,52 @@ GOOGLE_SPEECH_URL = (
 
 # Location of the `voices` directory inside this repo (for the status line).
 REPO_VOICES_DIR = Path(__file__).resolve().parent / "voices"
+
+# ---------------------------------------------------------------------------
+# Arabic pronunciation (tashkeel)
+# ---------------------------------------------------------------------------
+# Vowel-less Arabic is ambiguous — the same spelling reads several ways
+# ("العلم" = 'ilm / 'alam). Diacritizing the text before synthesis pins the
+# vowels so words come out from their correct makhraj. This is done by Mishkal
+# (linuxscout/mishkal), a RULE-BASED vocalizer backed by Arabic morphological
+# dictionaries — pure Python, no ML models, ~15MB of dictionaries.
+# It is OPTIONAL: if mishkal is missing (or OSAMAH_TASHKEEL=0) the gateway
+# speaks the raw text exactly as before.
+HAS_TASHKEEL = True
+_mishkal = None
+if os.environ.get("OSAMAH_TASHKEEL", "1").lower() in ("0", "no", "off", "false"):
+    HAS_TASHKEEL = False
+else:
+    try:
+        from mishkal.tashkeel import TashkeelClass
+
+        _mishkal = TashkeelClass()
+        print("[voice_gateway] mishkal tashkeel loaded — Arabic speech will be diacritized")
+    except Exception:  # pragma: no cover — optional dependency degrades gracefully
+        _mishkal = None
+        HAS_TASHKEEL = False
+
+# Tanween is the least reliable case-ending and the least needed for speech —
+# drop it so a wrong tanween can never garble a word's sound.
+_TANWEEN = str.maketrans("", "", "\u064B\u064C\u064D")
+
+
+def _has_arabic(text: str) -> bool:
+    return any("\u0600" <= ch <= "\u06FF" for ch in text)
+
+
+def _diacritize(text: str) -> str:
+    """Best-effort Arabic diacritization — never raises, never breaks speech."""
+    if not HAS_TASHKEEL or not text or not _has_arabic(text):
+        return text
+    try:
+        out = _mishkal.tashkeel(text, format_display="text") or text
+        if not _has_arabic(out):
+            return text
+        out = out.translate(_TANWEEN).replace("\u0640", "").strip()
+        return out or text
+    except Exception:  # pragma: no cover — keep speaking no matter what
+        return text
 
 
 def _speech_rate_to_percent(speech_rate: float) -> str:
@@ -130,7 +181,24 @@ def _google_transcribe(flac: bytes, lang: str) -> str:
     return best
 
 
-async def _transcribe_bytes(audio: bytes) -> str:
+def _stt_languages(locale_hint: str) -> list[str]:
+    """Smallest language chain that still transcribes reliably. The caller
+    sends its active locale, so Arabic speech tries only Arabic reads and
+    English tries only English — no wasted armed attempts across 4 languages.
+    Each language is attempted at most twice with a short pause, so a failed
+    first pass cannot add seconds to the user's "understand what was said"
+    delay (the voice conversation's reply clock starts the moment the user
+    finishes speaking)."""
+    hint = (locale_hint or "").lower()
+    if hint.startswith("en"):
+        return ["en-US"]
+    if hint.startswith("ar"):
+        # Yemeni MSA reads best, then MSA, then the generic Arabic tag.
+        return ["ar-YE", "ar-SA", "ar"]
+    return ["ar-YE", "ar-SA", "ar", "en-US"]
+
+
+async def _transcribe_bytes(audio: bytes, locale_hint: str) -> str:
     with tempfile.TemporaryDirectory(prefix="osamah-vgw-") as tmp:
         src = Path(tmp) / "input"
         src.write_bytes(audio)
@@ -158,15 +226,15 @@ async def _transcribe_bytes(audio: bytes) -> str:
         data = flac.read_bytes()
 
     loop = asyncio.get_running_loop()
-    # Same chain as the desktop assistant: Arabic first (Yemeni MSA read),
-    # then the auto-fallback languages, and English last so English speech
-    # still lands.
-    for lang in ("ar-YE", "ar-SA", "ar", "en-US"):
-        for _attempt in range(3):
+    # Same chain as the desktop assistant (Arabic first, English last), scoped
+    # to the recorder's locale and capped at 2 fast attempts per language so a
+    # dead first call never stalls the reply.
+    for lang in _stt_languages(locale_hint):
+        for _attempt in range(2):
             text = await loop.run_in_executor(None, _google_transcribe, data, lang)
             if text:
                 return text
-            await asyncio.sleep(0.7)
+            await asyncio.sleep(0.35)
     return ""
 
 
@@ -206,16 +274,17 @@ def _build_app() -> FastAPI:
         speech_rate = float(body.get("speechRate") or 1.0)
 
         if not voice:
-            if locale == "ar-SY" and gender == "female":
-                voice = EDGE_VOICES["female_ar_sy"]
-            elif locale == "ar-SY" and gender == "male":
-                voice = EDGE_VOICES["male_ar_sy"]
+            gender_norm = "female" if gender not in ("male", "female") else gender
+            if locale == "ar-SA":
+                voice = EDGE_VOICES[f"{gender_norm}_ar_sa"]
             elif locale.startswith("ar-"):
-                voice = EDGE_VOICES["female_ar_sy"]
+                voice = EDGE_VOICES[f"{gender_norm}_ar_sy"]
+            elif locale.startswith("en-"):
+                voice = EDGE_VOICES[f"{gender_norm}_en"]
             else:
                 voice = DEFAULT_VOICE
 
-        audio = await _synthesize(text, voice, speech_rate)
+        audio = await _synthesize(_diacritize(text), voice, speech_rate)
         return Response(
             content=audio,
             media_type="audio/mpeg",
@@ -227,7 +296,7 @@ def _build_app() -> FastAPI:
         body = await audio.read()
         if len(body) > MAX_AUDIO_BYTES:
             raise HTTPException(400, "audio too large")
-        text = await _transcribe_bytes(body)
+        text = await _transcribe_bytes(body, locale)
         if not text:
             raise HTTPException(422, "no speech recognized")
         return JSONResponse({"text": text})

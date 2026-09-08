@@ -7,6 +7,7 @@ const Layout = () => {
     <SQLiteProvider databaseName="chat.db" onInit={migrateDbIfNeeded}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="search" options={{ presentation: 'fullScreenModal', gestureEnabled: true }} />
         <Stack.Screen name="(modal)/image/[url]" options={{ presentation: 'fullScreenModal' }} />
       </Stack>
     </SQLiteProvider>

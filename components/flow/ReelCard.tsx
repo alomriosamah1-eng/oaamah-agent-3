@@ -80,8 +80,9 @@ export const ReelCard = memo(function ReelCard({
         </View>
       )}
 
-      {/* Bottom gradient for readability */}
-      <View style={styles.gradient} />
+      {/* Bottom gradient for readability — visual only, must NOT swallow touches
+        aimed at the seek bar / volume pill below (pointerEvents="none"). */}
+      <View style={styles.gradient} pointerEvents="none" />
 
       {/* Info block bottom-left */}
       <View style={[styles.info, { bottom: 64 + bottomInset }]} pointerEvents="none">

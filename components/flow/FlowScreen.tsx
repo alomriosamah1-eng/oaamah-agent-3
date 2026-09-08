@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useIsFocused } from '@react-navigation/native';
+import { useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import type { VideoSource } from 'expo-video';
 import { useTheme } from '@/theme/theme';
@@ -76,6 +77,8 @@ export function FlowScreen() {
   const [likedNow, setLikedNow] = useState<Set<string>>(new Set());
   const [activeSource, setActiveSource] = useState<VideoSource | null>(null);
   const [feedHeight, setFeedHeight] = useState(0);
+  const listRef = useRef<FlatList<FlowVideo> | null>(null);
+  const scrollTargetRef = useRef<number | null>(null);
 
   const pageTokenRef = useRef<string | undefined>(undefined);
   const lastSliceTokenRef = useRef<string | null>(null);
@@ -88,6 +91,92 @@ export function FlowScreen() {
   const allowKeywordsRef = useRef<string[]>([]);
   const avoidKeywordsRef = useRef<string[]>([]);
   const resolveTokenRef = useRef(0);
+
+  // Live mirror of `items` so async feed loads can decide whether they may
+  // overwrite the currently-visible feed (cache-first paint, filter offline).
+  const contentRef = useRef<FlowVideo[]>([]);
+  const commitItems = (next: FlowVideo[]) => {
+    contentRef.current = next;
+    setItems(next);
+  };
+
+  /** Route param support: `/flow?open=<ytId>&…` opens a specific video (from
+   *  the in-app search results). Applied once the feed settles, so background
+   *  live swaps (cache-first → live) do not drop the pinned card. */
+  const { open: openParam, openTitle, openChannel, openThumb, openDuration } = useLocalSearchParams<{
+    open?: string;
+    openTitle?: string;
+    openChannel?: string;
+    openThumb?: string;
+    openDuration?: string;
+  }>();
+  const pendingOpenRef = useRef<{ ytId: string; title?: string; channel?: string; thumb?: string; duration?: number } | null>(null);
+  const appliedOpenRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const id = typeof openParam === 'string' && openParam ? openParam : null;
+    if (!id || appliedOpenRef.current.has(id)) return;
+    pendingOpenRef.current = {
+      ytId: id,
+      title: typeof openTitle === 'string' ? decodeURIComponent(openTitle) : undefined,
+      channel: typeof openChannel === 'string' ? decodeURIComponent(openChannel) : undefined,
+      thumb: typeof openThumb === 'string' ? decodeURIComponent(openThumb) : undefined,
+      duration: typeof openDuration === 'string' ? Number(openDuration) || 0 : undefined,
+    };
+  }, [openParam, openTitle, openChannel, openThumb, openDuration]);
+
+  const applyPendingOpen = useCallback(() => {
+    const target = pendingOpenRef.current;
+    if (!target || items.length === 0) return;
+    pendingOpenRef.current = null;
+    appliedOpenRef.current.add(target.ytId);
+    const idx = items.findIndex((v) => v.ytId === target.ytId);
+    if (idx >= 0) {
+      setActiveIndex(idx);
+      scrollTargetRef.current = idx;
+      return;
+    }
+    // Video not in the current feed (e.g. online FLOW search hit) — build a
+    // card and pin it at the top, mirroring the saved-library onPick path.
+    const item: FlowVideo = {
+      ytId: target.ytId,
+      title: target.title || target.ytId,
+      channel: target.channel || '',
+      channelId: '',
+      thumb: target.thumb || '',
+      duration: target.duration ?? 0,
+      description: '',
+      publishedAt: Date.now(),
+      lang,
+    };
+    commitItems([item, ...contentRef.current]);
+    setFeedVersion((v) => v + 1);
+    setActiveIndex(0);
+    scrollTargetRef.current = 0;
+  }, [items, lang]);
+
+  // Debounced: `renderCacheFirst` + a following live `loadFirstPage` commit in
+  // quick succession would overwrite the pinned card, so wait ~150ms after the
+  // last feed change before applying the open request.
+  useEffect(() => {
+    const target = pendingOpenRef.current;
+    if (!target || booting || items.length === 0) return;
+    const timer = setTimeout(() => applyPendingOpen(), 150);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, feedVersion, booting]);
+
+  // Once the opened item is present and the feed has a real height, scroll the
+  // paged list to that card (also used by the saved-library jump).
+  useEffect(() => {
+    if (scrollTargetRef.current == null || items.length === 0 || feedHeight <= 0) return;
+    const idx = scrollTargetRef.current;
+    scrollTargetRef.current = null;
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index: idx, animated: false });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, feedVersion, feedHeight]);
 
   const bottomInset = TAB_BAR_HEIGHT + (insets.bottom > 0 ? insets.bottom : 6) + 14;
 
@@ -159,17 +248,64 @@ export function FlowScreen() {
     [db, lang]
   );
 
+  // Draw the persisted feed cache instantly so the first video appears the
+  // moment the tab opens, then let loadFirstPage refresh/swap it from the live
+  // providers in the background. This kills the long "Preparing feed…" blank.
+  const renderCacheFirst = useCallback(async (): Promise<boolean> => {
+    try {
+      const cached = await getFeedCache(db, lang, 60);
+      const allow = allowKeywordsRef.current;
+      const avoid = avoidKeywordsRef.current;
+      const fromCache: FlowVideo[] = [];
+      for (const v of cached) {
+        if (seenRef.current.has(v.ytId)) continue;
+        if (!passesFilter(v.title, v.description, v.channel, allow, avoid)) continue;
+        seenRef.current.add(v.ytId);
+        fromCache.push(v);
+      }
+      if (fromCache.length > 0) {
+        commitItems(fromCache);
+        setFeedVersion((v) => v + 1);
+        setHasMore(false);
+        setActiveIndex(0);
+        return true;
+      }
+    } catch {
+      // ignore cache errors — live fetch below still runs
+    }
+    return false;
+  }, [db, lang]);
+
   const loadFirstPage = useCallback(async (silent = false) => {
     if (!silent) setBooting(true);
     setLoadError(false);
     // NOTE: seenRef is intentionally NOT reset here. Keeping it across visits
     // means already-watched videos are skipped, so each entry fetches fresh
-    // results instead of replaying the same first page.
+    // results instead of replaying the same first page. Cached items already
+    // drawn by renderCacheFirst are also skipped so the live refresh is new
+    // content rather than a duplicate of what is on screen.
     try {
       const allow = allowKeywordsRef.current;
       const slices = [allow.slice(0, 3), allow.slice(3, 6), allow.slice(6, 9), allow.slice(9)].filter(
         (s) => s.length > 0
       );
+      const haveCached = contentRef.current.length > 0;
+
+      // When the cache already gave us a feed, prefetch the first slice LIVE
+      // immediately (skip rotation churn) and show the fresh results. fetchFiltered
+      // already dedupes against seenRef, so `fresh` is new content only.
+      if (haveCached) {
+        const query = allow.slice(0, 3).join(' ') || buildQuery();
+        const { items: fresh, next } = await fetchFiltered(query);
+        if (fresh.length > 0) {
+          commitItems(fresh);
+          setFeedVersion((v) => v + 1);
+        }
+        pageTokenRef.current = next ?? undefined;
+        setHasMore(next != null);
+        setActiveIndex(0);
+        return;
+      }
 
       // Rotate which keyword slice is queried FIRST on every load (persisted,
       // so the order changes even across app restarts).
@@ -182,23 +318,42 @@ export function FlowScreen() {
       }
 
       let merged: FlowVideo[] = [];
-      // Walk keyword slices until we gather a healthy first page.
+      // Walk keyword slices, committing each slice to the feed AS IT ARRIVES so
+      // the first reels appear immediately instead of waiting for the whole
+      // rotation to finish. We only wait for enough total items (~24), not for
+      // the first one.
       for (const slice of rotatedSlices) {
         if (merged.length >= 24) break;
         const { items, next } = await fetchFiltered(slice.join(' '));
-        merged = merged.concat(items);
         lastSliceTokenRef.current = next;
+        if (items.length > 0) {
+          merged = merged.concat(items);
+          // Paint what we have so far right away — the first video never blocks
+          // on the remaining slices (first paint wins over latency).
+          if (contentRef.current.length === 0) {
+            commitItems([...merged]);
+            setFeedVersion((v) => v + 1);
+            setActiveIndex(0);
+            setBooting(false);
+          }
+        }
       }
       if (rotatedSlices.length === 0) {
         const { items, next } = await fetchFiltered(buildQuery());
         merged = items;
         lastSliceTokenRef.current = next;
+        if (merged.length > 0 && contentRef.current.length === 0) {
+          commitItems([...merged]);
+          setFeedVersion((v) => v + 1);
+          setActiveIndex(0);
+          setBooting(false);
+        }
       }
 
-      // No live content (quota exhausted / providers down / everything seen).
-      // Fall back to the persisted feed cache so FLOW never shows a blank feed
-      // when the network providers are unavailable.
-      if (merged.length === 0) {
+      // No live content. Fall back to the persisted feed cache ONLY when the
+      // device is actually offline — while online, a stored reel must not be
+      // presented as a fresh online result.
+      if (merged.length === 0 && !online) {
         const cached = await getFeedCache(db, lang, 60);
         const allow = allowKeywordsRef.current;
         const avoid = avoidKeywordsRef.current;
@@ -212,14 +367,30 @@ export function FlowScreen() {
       }
 
       pageTokenRef.current = lastSliceTokenRef.current ?? undefined;
-      setItems(merged);
+      if (merged.length === 0 && contentRef.current.length > 0) {
+        // Live found nothing new but we already have a cached feed on screen —
+        // keep it instead of blanking the list.
+        setHasMore(false);
+        return;
+      }
+      commitItems(merged);
       setFeedVersion((v) => v + 1);
       setHasMore(lastSliceTokenRef.current != null && merged.length < 200);
       setActiveIndex(0);
     } catch {
-      // Live fetch threw. Before declaring an error, try the persisted cache so
-      // FLOW still renders content (network flaps, quota, provider deaths).
+      // Live fetch threw. Fall back to the persisted cache ONLY when offline;
+      // while online we surface the error so the user knows the feed failed
+      // instead of showing stale stored reels.
+      if (online) {
+        setLoadError(true);
+        return;
+      }
       try {
+        if (contentRef.current.length > 0) {
+          // Keep the already-rendered cached feed visible — do not blank it.
+          setHasMore(false);
+          return;
+        }
         const cached = await getFeedCache(db, lang, 60);
         const allow = allowKeywordsRef.current;
         const avoid = avoidKeywordsRef.current;
@@ -231,7 +402,7 @@ export function FlowScreen() {
           fromCache.push(v);
         }
         if (fromCache.length > 0) {
-          setItems(fromCache);
+          commitItems(fromCache);
           setFeedVersion((v) => v + 1);
           setHasMore(false);
           setActiveIndex(0);
@@ -244,7 +415,7 @@ export function FlowScreen() {
     } finally {
       setBooting(false);
     }
-  }, [fetchFiltered, buildQuery]);
+  }, [fetchFiltered, buildQuery, online]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -304,6 +475,9 @@ export function FlowScreen() {
       likedRef.current = new Set(likedList);
       setLikedNow(new Set(likedList));
       if (online) {
+        // Online: fetch and show the LIVE feed only. The persisted cache is
+        // reserved for the offline path — never shown while we can reach the
+        // live providers (a stored reel must not be presented as a fresh one).
         doRefreshKeywords();
         await loadFirstPage();
       } else {
@@ -319,7 +493,7 @@ export function FlowScreen() {
           publishedAt: s.addedAt,
           lang,
         }));
-        setItems(mapped);
+        commitItems(mapped);
         setHasMore(false);
         setActiveIndex(0);
         setBooting(false);
@@ -344,7 +518,7 @@ export function FlowScreen() {
           publishedAt: s.addedAt,
           lang,
         }));
-        setItems(mapped);
+        commitItems(mapped);
         setHasMore(false);
         setActiveIndex(0);
         setBooting(false);
@@ -488,10 +662,10 @@ export function FlowScreen() {
         delete idMap[item.ytId];
         savedByIdRef.current = idMap;
         if (!online) {
-          setItems((prev) => prev.filter((v) => v.ytId !== item.ytId));
+          commitItems(contentRef.current.filter((v) => v.ytId !== item.ytId));
           setActiveIndex(Math.max(0, activeIndex - 1));
         } else {
-          flashNotice(t('flow.savedFailed'));
+          flashNotice(t('flow.savedRemoved'));
         }
         return;
       }
@@ -557,6 +731,27 @@ export function FlowScreen() {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
+
+  /** Switch playback quality. Drops the active reel's cached resolution (both
+   *  in-memory and in SQLite) so `resolveActive` re-resolves at the new target
+   *  instead of reusing the old stream — otherwise the quality buttons do not
+   *  actually do anything. */
+  const changeQuality = useCallback(
+    (q: StreamQuality) => {
+      if (q === quality) return;
+      const id = items[activeIndex]?.ytId;
+      if (id) {
+        if (streamsRef.current[id]) {
+          const without = { ...streamsRef.current };
+          delete without[id];
+          streamsRef.current = without;
+        }
+        clearStreamCache(db, id).catch(() => {});
+      }
+      setQuality(q);
+    },
+    [quality, items, activeIndex, db]
+  );
 
   /* ------------------------------------------------------------------ */
   /* Render                                                              */
@@ -633,33 +828,12 @@ export function FlowScreen() {
         </View>
       )}
 
-      {booting || filtering ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator color={CyanNeon} size="large" />
-          <Text style={styles.stateText}>{filtering ? t('flow.tuning') : t('flow.booting')}</Text>
-        </View>
-      ) : loadError ? (
-        <View style={styles.centerState}>
-          <MaterialIcons name="error-outline" size={40} color={MagentaGlow} />
-          <Text style={styles.stateText}>{t('flow.error')}</Text>
-          <Pressable onPress={() => { doRefreshKeywords(); loadFirstPage(); }} style={styles.retryBtn}>
-            <Text style={styles.retryText}>{t('flow.retry')}</Text>
-          </Pressable>
-        </View>
-      ) : items.length === 0 ? (
-        <View style={styles.centerState}>
-          <MaterialIcons name="slideshow" size={44} color={DeepViolet} />
-          <Text style={styles.stateText}>{t('flow.empty')}</Text>
-          <Text style={styles.emptyHint}>{t('flow.emptyHint')}</Text>
-          <Pressable onPress={() => { doRefreshKeywords(); loadFirstPage(); }} style={styles.retryBtn}>
-            <Text style={styles.retryText}>{t('flow.tune')}</Text>
-          </Pressable>
-        </View>
-      ) : (
+      {items.length > 0 ? (
         <View style={styles.feed} onLayout={onFeedLayout}>
           {feedHeight > 0 ? (
             <>
               <FlatList
+                ref={listRef}
                 data={items}
                 keyExtractor={(v) => v.ytId}
                 renderItem={({ item, index }) => (
@@ -669,7 +843,7 @@ export function FlowScreen() {
                       isActive={index === activeIndex}
                       activeSource={index === activeIndex ? activeSource : null}
                       quality={quality}
-                      onQualityChange={(q) => setQuality(q)}
+                      onQualityChange={(q) => changeQuality(q)}
                       isSaved={savedSetRef.current.has(item.ytId)}
                       isLiked={likedNow.has(item.ytId)}
                       matchedKeyword={allowKeywordsRef.current[0] ?? ''}
@@ -713,12 +887,41 @@ export function FlowScreen() {
                   <Text style={{ color: colors.onSurfaceVariant, fontSize: 12 }}>{t('flow.loadingMore')}</Text>
                 </View>
               )}
+              {/* Keywords are still tuning in the background — non-blocking hint */}
+              {filtering && items.length > 0 && (
+                <View style={{ position: 'absolute', top: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: withAlpha('#0A0E17', 0.7), borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5 }}>
+                  <ActivityIndicator size="small" color={CyanNeon} />
+                  <Text style={{ color: '#E5E7EB', fontSize: 11 }}>{t('flow.tuning')}</Text>
+                </View>
+              )}
             </>
           ) : (
             <View style={styles.centerState}>
               <ActivityIndicator color={CyanNeon} size="small" />
             </View>
           )}
+        </View>
+      ) : booting || filtering ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color={CyanNeon} size="large" />
+          <Text style={styles.stateText}>{filtering ? t('flow.tuning') : t('flow.booting')}</Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.centerState}>
+          <MaterialIcons name="error-outline" size={40} color={MagentaGlow} />
+          <Text style={styles.stateText}>{t('flow.error')}</Text>
+          <Pressable onPress={() => { doRefreshKeywords(); loadFirstPage(); }} style={styles.retryBtn}>
+            <Text style={styles.retryText}>{t('flow.retry')}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.centerState}>
+          <MaterialIcons name="slideshow" size={44} color={DeepViolet} />
+          <Text style={styles.stateText}>{t('flow.empty')}</Text>
+          <Text style={styles.emptyHint}>{t('flow.emptyHint')}</Text>
+          <Pressable onPress={() => { doRefreshKeywords(); loadFirstPage(); }} style={styles.retryBtn}>
+            <Text style={styles.retryText}>{t('flow.tune')}</Text>
+          </Pressable>
         </View>
       )}
 

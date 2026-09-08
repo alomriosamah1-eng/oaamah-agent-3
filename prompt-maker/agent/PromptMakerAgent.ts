@@ -30,6 +30,8 @@ export interface PromptMakerAgentOptions {
   lang?: PromptLang;
   intent?: PromptIntent;
   signal?: AbortSignal;
+  /** Live-progress hook — receives the raw full-so-far reply while streaming. */
+  onPartial?: (fullSoFar: string) => void;
 }
 
 const MAX_TOKENS = 2400;
@@ -47,6 +49,7 @@ export class PromptMakerAgent {
         temperature: 0.5,
         maxTokens: MAX_TOKENS,
         sessionKey: 'prompt-maker',
+        onPartial: opts.onPartial,
       },
       opts.signal,
     );
@@ -68,6 +71,7 @@ export class PromptMakerAgent {
         temperature: 0.5,
         maxTokens: MAX_TOKENS,
         sessionKey: 'prompt-maker',
+        onPartial: opts.onPartial,
       },
       opts.signal,
     );

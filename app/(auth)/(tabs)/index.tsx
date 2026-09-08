@@ -1,7 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
 import { typography } from '@/theme/typography';
@@ -10,8 +10,9 @@ import { useI18n } from '@/i18n/provider';
 import { OsmahGlowBackdrop } from '@/components/OsmahGlowBackdrop';
 import { OsamahHeader } from '@/components/OsamahHeader';
 import { DateTimeCard } from '@/components/DateTimeCard';
-import { VoiceOrb, VoiceOrbState } from '@/utils/orbs';
-import { useVoiceController } from '@/utils/voice/useVoiceController';
+import { VoiceOrb, VoiceOrbState, GalleryOrb, GalleryState, isGalleryStyle, type OrbStyleId } from '@/utils/orbs';
+import { loadVoiceConfig } from '@/utils/voice/config';
+import { useVoice } from '@/components/VoiceProvider';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
 
 const ORB_STATE: Record<string, VoiceOrbState> = {
@@ -21,11 +22,24 @@ const ORB_STATE: Record<string, VoiceOrbState> = {
   speaking: 'speaking',
 };
 
+/** Same lifecycle onto the gallery's five-state union ('failed' → error). */
+const GALLERY_STATE: Record<VoiceOrbState, GalleryState> = {
+  disconnected: 'idle',
+  connecting: 'idle',
+  'pre-connect-buffering': 'idle',
+  failed: 'error',
+  initializing: 'idle',
+  idle: 'idle',
+  listening: 'listening',
+  thinking: 'thinking',
+  speaking: 'speaking',
+};
+
 /** Per-phase hero orb palette — the orb shifts color as the agent state
  *  changes: white-calm idle, cyan listen, violet think, emerald speak,
- *  red error. */
+ *  red error. The backdrop glows with the same pair behind it. */
 const ORB_COLORS: Record<string, { color: string; colorTo: string }> = {
-  idle: { color: '#E0F7FF', colorTo: DeepViolet },
+  idle: { color: '#A8F0FF', colorTo: DeepViolet },
   listening: { color: CyanNeon, colorTo: ElectricBlue },
   thinking: { color: DeepViolet, colorTo: MagentaGlow },
   speaking: { color: EmeraldGlow, colorTo: CyanNeon },
@@ -36,7 +50,7 @@ const Page = () => {
   const { t } = useI18n();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const voice = useVoiceController();
+  const voice = useVoice();
   const router = useRouter();
 
   const topSafeArea = insets.top > 0 ? insets.top + 4 : 10;
@@ -49,11 +63,37 @@ const Page = () => {
     ? { color: Red, colorTo: MagentaGlow }
     : ORB_COLORS[voice.phase] ?? ORB_COLORS.idle;
 
-  // One press controls the whole conversation: idle → start listening,
-  // anything active → stop everything (turn the mic + agent + voice off).
+  // Re-read the picker's choice whenever the screen regains focus — the
+  // controller loads config once on mount, and the settings tab stays
+  // mounted, so without this a new orb style only showed after relaunch.
+  const [persistedStyle, setPersistedStyle] = useState<OrbStyleId | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      loadVoiceConfig()
+        .then((cfg) => {
+          if (active) setPersistedStyle(cfg.orbStyle);
+        })
+        .catch(() => {});
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+  const orbStyleId = persistedStyle ?? voice.config.orbStyle;
+
+  // One press controls the whole conversation — the floor is always yours:
+  // idle → start listening · speaking/thinking → interrupt (audio stops, the
+  // mic re-opens) · listening → stop everything.
   const onOrbPress = useCallback(() => {
     voice.toggle();
   }, [voice]);
+
+  const tapLabel = (() => {
+    if (voice.phase === 'idle') return t('voice.tapToListen');
+    if (voice.phase === 'speaking' || voice.phase === 'thinking') return t('voice.tapToInterrupt');
+    return t('voice.tapToStop');
+  })();
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background, paddingTop: topSafeArea }]}>
@@ -67,42 +107,69 @@ const Page = () => {
         <Pressable
           onPress={onOrbPress}
           accessibilityRole="button"
-          accessibilityLabel={
-            voice.phase === 'idle' ? t('voice.tapToListen') : t('voice.tapToStop')
-          }
-          style={({ pressed }) => [styles.orbPress, { width: orbSize + 22, height: orbSize + 22 }, pressed && { opacity: 0.92 }]}>
-          <View style={[styles.orbHalo, { borderColor: withAlpha(palette.color, 0.4) }]} />
-          <VoiceOrb
-            state={orbState}
-            size={orbSize}
-            color={palette.color}
-            colorTo={palette.colorTo}
-            colorSpread={0.65}
-            inputAmplitude={voice.micLevel.level}
-            outputAmplitude={voice.outputLevels.level}
-          />
+          accessibilityLabel={tapLabel}
+          hitSlop={26}
+          style={({ pressed }) => [
+            styles.orbPress,
+            { width: orbSize + 24, height: orbSize + 24, borderRadius: (orbSize + 24) / 2 },
+            pressed && { opacity: 0.94 },
+          ]}>
+          {/* The orb's BODY — a vivid glow disc that shifts with the
+              conversation state (cyan listen, violet think, emerald speak).
+              No ring around it, no button look: the body IS the orb's
+              background, the whole circle is the touch surface, and nothing
+              inside reads as a control. Its hue (the secondary palette
+              color) is deliberately different from the dots, so the bright
+              saturated dots stand out against it. This disc belongs to the
+              dotted shell only — the gallery orbs draw their own scene
+              (including the background), so the old frame is skipped there. */}
+          {!isGalleryStyle(orbStyleId) && (
+            <>
+              <View
+                style={[
+                  styles.orbBody,
+                  { backgroundColor: withAlpha(palette.colorTo, 0.45), shadowColor: palette.colorTo },
+                ]}
+              />
+              <View
+                style={[
+                  styles.orbInner,
+                  { backgroundColor: withAlpha(palette.color, 0.16), shadowColor: palette.color },
+                ]}
+              />
+            </>
+          )}
+          {isGalleryStyle(orbStyleId) ? (
+            <GalleryOrb
+              style={orbStyleId}
+              state={GALLERY_STATE[orbState]}
+              size={orbSize}
+              color={palette.color}
+              colorTo={palette.colorTo}
+              inputAmplitude={voice.micLevel.level}
+              outputAmplitude={voice.outputLevels.level}
+            />
+          ) : (
+            <VoiceOrb
+              state={orbState}
+              size={orbSize}
+              color={palette.color}
+              colorTo={palette.colorTo}
+              colorSpread={0.9}
+              dotScale={1.2}
+              inputAmplitude={voice.micLevel.level}
+              outputAmplitude={voice.outputLevels.level}
+            />
+          )}
         </Pressable>
 
         <Text style={[styles.tapHint, { color: colors.onSurfaceVariant }]} numberOfLines={1}>
-          {voice.phase === 'idle' ? t('voice.tapToListen') : t('voice.tapToStop')}
-        </Text>
-
-        <Text
-          style={[
-            styles.statusLine,
-            { color: hasError ? Red : withAlpha(colors.onSurfaceVariant, 0.62) },
-          ]}
-          numberOfLines={1}>
-          {hasError
-            ? voice.lastError || voice.diag || ''
-            : voice.sttNeedsGateway
-              ? t('voice.cloudSttNeedsGateway')
-              : voice.providerLine}
+          {tapLabel}
         </Text>
       </View>
 
       <Pressable
-        onPress={() => router.navigate('/chat')}
+        onPress={() => router.push('/search')}
         accessibilityRole="button"
         accessibilityLabel={t('home.searchPlaceholder')}
         style={({ pressed }) => [
@@ -133,26 +200,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  orbHalo: {
+  orbBody: {
     position: 'absolute',
     width: '100%',
     height: '100%',
     borderRadius: 999,
-    borderWidth: 1,
-    opacity: 0.35,
+    opacity: 0.95,
+    shadowOpacity: 0.55,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
+  },
+  orbInner: {
+    position: 'absolute',
+    width: '62%',
+    height: '62%',
+    borderRadius: 999,
+    opacity: 0.9,
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 5,
   },
   tapHint: {
     ...(typography.labelSmall as any),
     textAlign: 'center',
     paddingHorizontal: 32,
     opacity: 0.85,
-  },
-  statusLine: {
-    ...(typography.labelSmall as any),
-    textAlign: 'center',
-    paddingHorizontal: 24,
-    fontSize: 11,
-    opacity: 0.9,
   },
   searchBar: {
     position: 'absolute',

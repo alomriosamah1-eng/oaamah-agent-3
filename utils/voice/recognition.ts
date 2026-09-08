@@ -11,7 +11,8 @@
 // the desktop never used one, so neither do we.
 
 import { setAudioModeAsync } from 'expo-audio';
-import { gatewayTranscribe } from './providers/gateway';
+import { Platform } from 'react-native';
+import { sttRouter } from './providers/sttRouter';
 
 export interface RecognitionCallbacks {
   /** Final transcript; '' means only a noise blip was heard (re-arm). */
@@ -54,6 +55,30 @@ const VAD_MAX_DURATION_MS = 30_000;
 const VAD_MIN_SPEECH_MS = 400;
 const VAD_MAX_SILENCE_MS = 1000;
 const VAD_CALIBRATE_MS = 1200;
+
+/**
+ * Platform-flattened recording options — the same shape expo-audio's own
+ * `createRecordingOptions` produces for the active platform. The native
+ * `AudioRecorder` constructor requires this flat object; passing the nested
+ * RecordingPresets bundle (or nothing) fails to construct on iOS/Android.
+ */
+function vadRecordingOptions(): Record<string, unknown> {
+  const preset = (AudioRecorderModule?.RecordingPresets?.HIGH_QUALITY ?? {}) as Record<string, unknown>;
+  const common: Record<string, unknown> = {
+    extension: preset.extension,
+    sampleRate: preset.sampleRate,
+    numberOfChannels: preset.numberOfChannels,
+    bitRate: preset.bitRate,
+    isMeteringEnabled: true,
+  };
+  const platform =
+    Platform.OS === 'ios'
+      ? (preset.ios ?? {})
+      : Platform.OS === 'android'
+        ? (preset.android ?? {})
+        : (preset.web ?? {});
+  return { ...common, ...(platform as Record<string, unknown>) };
+}
 
 /** dBFS meter in [-160, 0] → linear amplitude (16-bit scale, 0..1-ish). */
 function meteringToAmplitude(dB: number | undefined): number {
@@ -121,7 +146,7 @@ export function createRecognizer(): Recognizer {
       return;
     }
     try {
-      const text = await gatewayTranscribe(uri, session.locale);
+      const text = await sttRouter(uri, session.locale);
       session.callbacks.onFinal(text);
     } catch (err) {
       session.callbacks.onError(err instanceof Error ? err : new Error(String(err)));
@@ -185,7 +210,7 @@ export function createRecognizer(): Recognizer {
   }
 
   async function oneAttempt(locale: string, callbacks: RecognitionCallbacks) {
-    const { setAudioModeAsync: mode, requestRecordingPermissionsAsync, RecordingPresets, AudioModule } =
+    const { setAudioModeAsync: mode, requestRecordingPermissionsAsync, AudioModule } =
       AudioRecorderModule;
     // Ask for the microphone directly. `request()` shows the system dialog the
     // first time and resolves from the cached state afterwards — it returns
@@ -199,21 +224,26 @@ export function createRecognizer(): Recognizer {
       throw new Error('audio recorder unavailable');
     }
     try {
-      await mode({ allowsRecording: true });
+      // iOS refuses `allowsRecording: true` while silent playback is off —
+      // both flags must be set together or the mode call throws before the
+      // recorder can open. (See expo-audio's "Impossible audio mode" error.)
+      await mode({ allowsRecording: true, playsInSilentMode: true });
     } catch (err) {
       throw new Error(`voice mode failed: ${messageOf(err)}`);
     }
     locals = { locale, callbacks };
     let r: any;
     try {
-      r = new AudioModule.AudioRecorder();
+      // The native constructor REQUIRES its options object. Keep the options
+      // platform-flattened (same shape expo's own `createRecordingOptions`
+      // produces) — the nested preset alone would be rejected on iOS.
+      r = new AudioModule.AudioRecorder(vadRecordingOptions());
     } catch (err) {
       throw new Error(`recorder create failed: ${messageOf(err)}`);
     }
     recorder = r;
-    const vadRecordingOptions = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true };
     try {
-      await r.prepareToRecordAsync(vadRecordingOptions);
+      await r.prepareToRecordAsync();
     } catch (err) {
       throw new Error(`recorder prepare failed: ${messageOf(err)}`);
     }

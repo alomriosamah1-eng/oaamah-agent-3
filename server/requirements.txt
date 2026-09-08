@@ -5,3 +5,8 @@ edge-tts>=6.1.12
 fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
+# Optional: Arabic diacritization (tashkeel) before synthesis for accurate
+# pronunciation — Mishkal (rule-based vocalizer + Arabic morphological
+# dictionaries, pure Python ~15MB, no ML models). The gateway runs without it
+# if this is not installed; disable at runtime with OSAMAH_TASHKEEL=0.
+mishkal>=0.4.1

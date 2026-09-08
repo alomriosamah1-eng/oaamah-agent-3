@@ -5,12 +5,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
 import { typography, FontWeights } from '@/theme/typography';
-import { withAlpha, CyanNeon, ElectricBlue, DeepViolet, Amber, Green } from '@/theme/colors';
+import { withAlpha, CyanNeon, ElectricBlue, DeepViolet, Amber, Green, EmeraldGlow } from '@/theme/colors';
 import { Spacer, Divider } from '@/theme/primitives';
 import { useI18n, TKey } from '@/i18n/provider';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
 
-type SectionKey = 'control' | 'knowledge' | 'profile' | 'chat' | 'appearance' | 'about';
+type SectionKey = 'control' | 'knowledge' | 'profile' | 'chat' | 'appearance' | 'storage' | 'about';
 
 interface AdminMeta {
   key: SectionKey;
@@ -24,6 +24,7 @@ const ADMINS: AdminMeta[] = [
   { key: 'profile', icon: 'person', color: Amber },
   { key: 'chat', icon: 'chat-bubble', color: ElectricBlue },
   { key: 'appearance', icon: 'palette', color: Green },
+  { key: 'storage', icon: 'cleaning-services', color: EmeraldGlow },
   { key: 'about', icon: 'info', color: '#FF6384' },
 ];
 

@@ -12,8 +12,9 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { buildHistoryPrompt } from '@/utils/Opencode';
 import { AgentUnavailableError, chatComplete, chatStream, getSelectedZenModel, OSAMAH_SYSTEM } from '@/utils/OpenCodeAgent';
 import { BrandNavTitle } from '@/components/BrandNavTitle';
-import { archiveToServer, cleanChatMessages, saveConversationAsPdf, saveConversationAsLongPdf, messagesToMarkdown } from '@/utils/Pdf';
+import { archiveToServer, cleanChatMessages, PdfFile, saveConversationAsPdf, saveConversationAsLongPdf, messagesToMarkdown } from '@/utils/Pdf';
 import { addSavedFile } from '@/utils/savedFiles';
+import { deriveDocumentTitle, sanitizePdfName } from '@/utils/pdfPrint';
 import { TaskLevel, taskLevelDirective } from '@/utils/taskLevel';
 import { isComplexTask, executeTask } from '@/utils/TaskOrchestrator';
 import { isLongDocRequest } from '@/utils/longDocument';
@@ -244,31 +245,48 @@ const ChatPage = () => {
   // PDF agent flow (organize content → structured doc → PDF → save)
   // ------------------------------------------------------------------
 
+  const registerPdfFiles = async (files: PdfFile[], baseTitle: string, lang: 'ar' | 'en', chatId?: number) => {
+    await Promise.all(
+      files.map((f) => {
+        const partSuffix =
+          f.part && f.total
+            ? lang === 'ar'
+              ? ` (الجزء ${f.part} من ${f.total})`
+              : ` (part ${f.part} of ${f.total})`
+            : '';
+        const name = `${sanitizePdfName(baseTitle)}${partSuffix}.pdf`;
+        return addSavedFile(f.uri, name, 'pdf', { chatId, previewHtml: f.html });
+      }),
+    );
+  };
+
   const runPdfAgent = async (text: string, abort: AbortController) => {
     patchLastBot(t('pdfDoc.organizing'));
     const lang = text.match(/[\u0600-\u06FF]/) ? 'ar' : 'en';
-    const title = `${t('appName')} — ${new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}`;
+    const title = deriveDocumentTitle(text, undefined, lang);
 
     // Pass current conversation to the agent for organization
     const chatRows = messagesRef.current
       .filter((m) => m.content && m.content.trim() !== '')
       .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
 
-    const uri = await saveConversationAsPdf(
+    const outcome = await saveConversationAsPdf(
       chatRows,
       {
         title,
         lang,
-        mode: 'dark',
         model: await getSelectedZenModel(),
         signal: abort.signal,
-        onStatus: (_phase, label) => {
-          if (label) patchLastBot(label);
+        onStatus: (_phase, label, _current, _total, progress) => {
+          const bits: string[] = [];
+          if (label) bits.push(label);
+          if (progress) bits.push(`${progress.percent}%`, `${Math.round(progress.elapsedMs / 1000)}s`);
+          if (bits.length) patchLastBot(bits.join(' • '));
         },
       },
     );
 
-    await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
+    await registerPdfFiles(outcome.files, title, lang, chatIdRef.current ? parseInt(chatIdRef.current) : undefined);
     await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
 
     patchLastBot(t('pdfDoc.done'));
@@ -279,33 +297,30 @@ const ChatPage = () => {
   const runLongPdfAgent = async (text: string, abort: AbortController) => {
     patchLastBot(t('pdfDoc.organizing'));
     const lang = text.match(/[\u0600-\u06FF]/) ? 'ar' : 'en';
-    const title = `${t('appName')} — ${new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })}`;
+    const title = deriveDocumentTitle(text, undefined, lang);
 
     const chatRows = messagesRef.current
       .filter((m) => m.content && m.content.trim() !== '')
       .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
 
-    const uri = await saveConversationAsLongPdf(
+    const outcome = await saveConversationAsLongPdf(
       chatRows,
       {
         title,
         lang,
-        mode: 'dark',
         model: await getSelectedZenModel(),
         signal: abort.signal,
-        onStatus: (_phase, label, current, total) => {
-          if (label) {
-            patchLastBot(
-              total && current
-                ? `${label} ${current}/${total}`
-                : label,
-            );
-          }
+        onStatus: (phase, label, current, total, progress) => {
+          const bits: string[] = [];
+          if (label) bits.push(label);
+          if (phase === 'writing' && total) bits.push(`${current}/${total}`);
+          if (progress) bits.push(`${progress.percent}%`, `${Math.round(progress.elapsedMs / 1000)}s`);
+          if (bits.length) patchLastBot(bits.join(' • '));
         },
       },
     );
 
-    await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
+    await registerPdfFiles(outcome.files, outcome.title || title, lang, chatIdRef.current ? parseInt(chatIdRef.current) : undefined);
     await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
 
     patchLastBot(t('pdfDoc.done'));
@@ -390,15 +405,14 @@ const ChatPage = () => {
         .map((m) => ({ role: m.role === Role.User ? 'user' as const : 'bot' as const, content: m.content }));
 
       const lang = 'ar';
-      const title = `${t('appName')} — ${new Date().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}`;
+      const title = deriveDocumentTitle(undefined, undefined, lang);
 
-      const uri = await saveConversationAsPdf(chatRows, {
+      const outcome = await saveConversationAsPdf(chatRows, {
         title,
         lang,
-        mode: 'dark',
         signal: abort.signal,
       });
-      await addSavedFile(uri, `${title}.pdf`, 'pdf', { chatId: chatIdRef.current ? parseInt(chatIdRef.current) : undefined });
+      await registerPdfFiles(outcome.files, outcome.title || title, lang, chatIdRef.current ? parseInt(chatIdRef.current) : undefined);
       await archiveToServer(title, messagesToMarkdown(cleanChatMessages(chatRows)));
     } catch (err: any) {
       if (err?.name === 'AbortError') return;

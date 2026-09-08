@@ -7,7 +7,6 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   Image,
   ActivityIndicator,
 } from 'react-native';
@@ -18,7 +17,6 @@ import { withAlpha } from '@/theme/colors';
 import { useI18n } from '@/i18n/provider';
 import { TaskTypeSelector } from '@/components/TaskTypeSelector';
 import { TaskLevel } from '@/utils/taskLevel';
-import { recordOneShot } from '@/utils/voice/recognition';
 
 const MessageInput = ({
   onShouldSend,
@@ -31,67 +29,24 @@ const MessageInput = ({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const [taskType, setTaskType] = useState<TaskLevel>('normal');
-  const [showMic, setShowMic] = useState(false);
-  const [listening, setListening] = useState(false);
   const inputRef = useRef<TextInput>(null);
-  const dictRef = useRef<{ cancel: () => void } | null>(null);
 
   const send = async () => {
     if (text.length < 1) return;
     await onShouldSend(text, taskType);
     setText('');
-    setShowMic(false);
-  };
-
-  const micPressed = async () => {
-    // Desktop-method dictation: records with the energy VAD and transcribes
-    // through the voice gateway (Google). Tap again to cancel early.
-    const one = recordOneShot('ar-SY');
-    if (!one) {
-      Alert.alert(t('chat.voiceUnavailableTitle'), t('chat.voiceUnavailableBody'));
-      return;
-    }
-    dictRef.current = one;
-    setListening(true);
-    try {
-      const spoken = await one.result;
-      if (spoken) setText(spoken);
-    } catch {
-      Alert.alert(t('chat.voiceErrorTitle'), t('chat.voiceErrorBody'));
-    } finally {
-      setListening(false);
-      dictRef.current = null;
-    }
-  };
-
-  const micReleased = () => {
-    dictRef.current?.cancel();
-    dictRef.current = null;
-    setListening(false);
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={[styles.container, { backgroundColor: withAlpha(colors.surfaceVariant, 0.55) }]}>
         <View style={styles.buttonView}>
-          {showMic || text.length > 0 ? (
-            <TouchableOpacity
-              onPress={send}
-              disabled={disabled}
-              style={[styles.buttonSend, { backgroundColor: disabled ? withAlpha(colors.primary, 0.4) : colors.primary }]}>
-              {disabled ? <ActivityIndicator size="small" color="#000" /> : <Ionicons name="arrow-up" size={22} color="#000" />}
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={() => {
-                if (listening) micReleased();
-                else void micPressed();
-              }}
-              activeOpacity={0.7}
-              style={[styles.buttonMic, { borderColor: withAlpha(colors.outline, 0.3) }]}>
-              <Ionicons name={listening ? 'stop' : 'mic'} size={22} color={colors.onSurface} />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            onPress={send}
+            disabled={disabled}
+            style={[styles.buttonSend, { backgroundColor: disabled ? withAlpha(colors.primary, 0.4) : colors.primary }]}>
+            {disabled ? <ActivityIndicator size="small" color="#000" /> : <Ionicons name="arrow-up" size={22} color="#000" />}
+          </TouchableOpacity>
         </View>
         <TaskTypeSelector onChange={setTaskType} />
         <TextInput
@@ -100,9 +55,6 @@ const MessageInput = ({
           value={text}
           onChangeText={(v) => {
             setText(v);
-          }}
-          onFocus={() => {
-            setShowMic(false);
           }}
           placeholder={t('chat.placeholder')}
           placeholderTextColor={colors.onSurfaceVariant}
@@ -154,15 +106,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  buttonMic: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#000',
-    borderWidth: 1,
   },
 });
 export default MessageInput;

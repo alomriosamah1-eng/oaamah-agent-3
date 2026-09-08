@@ -56,17 +56,44 @@ export interface DocumentSchema {
     lang: "ar" | "en";
     description?: string;
   };
-  theme: { mode: "dark" | "light"; accent?: string };
+  theme: { mode: "dark" | "light" | "print"; accent?: string };
   cover?: {
     title: string;
     subtitle?: string;
     badge?: string;
+    /** Large topic icon (emoji) shown on the cover page. */
+    icon?: string;
     description?: string;
   };
   sections: Block[];
 }
 
-export type ThemeTokens = typeof designTokens.dark | typeof designTokens.light;
+export interface ThemeTokens {
+  background: string;
+  surface: string;
+  surfaceLight: string;
+  textPrimary: string;
+  textSecondary: string;
+  /** Base weight applied to body text (paragraphs, lists, cells, cards). */
+  textWeight: string;
+  accent: string;
+  accentAlt: string;
+  border: string;
+  cardBg: string;
+  calloutBg: Record<'note' | 'tip' | 'warning' | 'important', string>;
+  calloutBorder: Record<'note' | 'tip' | 'warning' | 'important', string>;
+  codeBg: string;
+  codeText: string;
+  tableHeader: string;
+  tableHeaderText: string;
+  tableRowEven: string;
+  tableBorder: string;
+  quoteBorder: string;
+  quoteBg: string;
+  heading: Record<'h1' | 'h2' | 'h3' | 'h4', string>;
+  divider: string;
+  statsCardBg: string;
+}
 
 export const designTokens = {
   dark: {
@@ -75,6 +102,7 @@ export const designTokens = {
     surfaceLight: "#1E293B",
     textPrimary: "#F9FAFB",
     textSecondary: "#9CA3AF",
+    textWeight: "400",
     accent: "#00F0FF",
     accentAlt: "#0070F3",
     border: "rgba(255,255,255,0.12)",
@@ -109,6 +137,7 @@ export const designTokens = {
     surfaceLight: "#F1F5F9",
     textPrimary: "#0F172A",
     textSecondary: "#64748B",
+    textWeight: "500",
     accent: "#0070F3",
     accentAlt: "#7928CA",
     border: "rgba(0,0,0,0.08)",
@@ -138,6 +167,46 @@ export const designTokens = {
       h2: "#1E293B",
       h3: "#374151",
       h4: "#4B5563",
+    },
+    divider: "#E2E8F0",
+    statsCardBg: "#F8FAFC",
+  },
+  print: {
+    background: "#FFFFFF",
+    surface: "#FFFFFF",
+    surfaceLight: "#EEF2F7",
+    textPrimary: "#111827",
+    textSecondary: "#374151",
+    textWeight: "600",
+    accent: "#1D4ED8",
+    accentAlt: "#4C1D95",
+    border: "#E2E8F0",
+    cardBg: "#F8FAFC",
+    calloutBg: {
+      note: "#EFF6FF",
+      tip: "#ECFDF5",
+      warning: "#FFFBEB",
+      important: "#F5F3FF",
+    },
+    calloutBorder: {
+      note: "#1E40AF",
+      tip: "#047857",
+      warning: "#B45309",
+      important: "#6D28D9",
+    },
+    codeBg: "#EEF2F7",
+    codeText: "#0B1220",
+    tableHeader: "#111827",
+    tableHeaderText: "#FFFFFF",
+    tableRowEven: "#F8FAFC",
+    tableBorder: "#E2E8F0",
+    quoteBorder: "#4C1D95",
+    quoteBg: "#F5F3FF",
+    heading: {
+      h1: "#0F172A",
+      h2: "#1E3A8A",
+      h3: "#4C1D95",
+      h4: "#9D174D",
     },
     divider: "#E2E8F0",
     statsCardBg: "#F8FAFC",
@@ -202,17 +271,17 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
     }
 
     case "paragraph":
-      return `<p style="margin:0.6em 0;line-height:1.8;color:${tokens.textPrimary};font-size:1em">${wrapInline(block.content, tokens)}</p>`;
+      return `<p style="margin:0.6em 0;line-height:1.8;color:${tokens.textPrimary};font-size:1em;font-weight:${tokens.textWeight}">${wrapInline(block.content, tokens)}</p>`;
 
     case "list": {
       const tag = block.ordered ? "ol" : "ul";
       const items = block.items
         .map(
           (item) =>
-            `<li style="margin:0.3em 0;line-height:1.7;color:${tokens.textPrimary}">${wrapInline(item, tokens)}</li>`
+            `<li style="margin:0.3em 0;line-height:1.7;color:${tokens.textPrimary};font-weight:${tokens.textWeight}">${wrapInline(item, tokens)}</li>`
         )
         .join("");
-      return `<${tag} style="padding-${tokens === designTokens.dark ? "right" : "left"}:1.5em;margin:0.5em 0">${items}</${tag}>`;
+      return `<${tag} style="padding-inline-start:1.5em;margin:0.5em 0">${items}</${tag}>`;
     }
 
     case "checklist": {
@@ -224,7 +293,7 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
           const strike = item.checked
             ? "text-decoration:line-through;opacity:0.6"
             : "";
-          return `<li style="margin:0.4em 0;line-height:1.7;color:${tokens.textPrimary};list-style:none;display:flex;align-items:flex-start;gap:8px;${strike}">${icon}<span>${wrapInline(item.content, tokens)}</span></li>`;
+          return `<li style="margin:0.4em 0;line-height:1.7;color:${tokens.textPrimary};list-style:none;display:flex;align-items:flex-start;gap:8px;${strike}">${icon}<span style="font-weight:${tokens.textWeight}">${wrapInline(item.content, tokens)}</span></li>`;
         })
         .join("");
       return `<ul style="padding:0;margin:0.5em 0">${items}</ul>`;
@@ -243,7 +312,7 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
           const cells = row
             .map(
               (cell) =>
-                `<td style="padding:9px 14px;border-bottom:1px solid ${tokens.tableBorder};background:${bg};color:${tokens.textPrimary};font-size:0.9em">${wrapInline(cell, tokens)}</td>`
+                `<td style="padding:9px 14px;border-bottom:1px solid ${tokens.tableBorder};background:${bg};color:${tokens.textPrimary};font-size:0.9em;font-weight:${tokens.textWeight}">${wrapInline(cell, tokens)}</td>`
             )
             .join("");
           return `<tr>${cells}</tr>`;
@@ -260,21 +329,21 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
       const titleHtml = block.title
         ? `<div style="font-weight:700;font-size:1.05em;color:${tokens.textPrimary};margin-bottom:8px">${escapeHtml(block.title)}</div>`
         : "";
-      return `<div style="background:${tokens.cardBg};border:1px solid ${tokens.border};border-right:4px solid ${accentColor};border-radius:10px;padding:16px 20px;margin:0.8em 0;backdrop-filter:blur(8px)">${titleHtml}<div style="color:${tokens.textPrimary};line-height:1.7">${wrapInline(block.content, tokens)}</div></div>`;
+      return `<div style="background:${tokens.cardBg};border:1px solid ${tokens.border};border-right:4px solid ${accentColor};border-radius:10px;padding:16px 20px;margin:0.8em 0;backdrop-filter:blur(8px)">${titleHtml}<div style="color:${tokens.textPrimary};line-height:1.7;font-weight:${tokens.textWeight}">${wrapInline(block.content, tokens)}</div></div>`;
     }
 
     case "callout": {
       const bg = tokens.calloutBg[block.kind];
       const border = tokens.calloutBorder[block.kind];
       const icon = CALLOUT_ICONS[block.kind];
-      return `<div style="background:${bg};border-right:4px solid ${border};border-radius:8px;padding:14px 18px;margin:0.8em 0;display:flex;gap:10px;align-items:flex-start"><span style="font-size:1.2em;flex-shrink:0">${icon}</span><div style="color:${tokens.textPrimary};line-height:1.7">${wrapInline(block.content, tokens)}</div></div>`;
+      return `<div style="background:${bg};border-right:4px solid ${border};border-radius:8px;padding:14px 18px;margin:0.8em 0;display:flex;gap:10px;align-items:flex-start"><span style="font-size:1.2em;flex-shrink:0">${icon}</span><div style="color:${tokens.textPrimary};line-height:1.7;font-weight:${tokens.textWeight}">${wrapInline(block.content, tokens)}</div></div>`;
     }
 
     case "quote": {
       const authorHtml = block.author
         ? `<footer style="color:${tokens.textSecondary};font-size:0.85em;margin-top:8px;text-align:left">— ${escapeHtml(block.author)}</footer>`
         : "";
-      return `<blockquote style="border-right:4px solid ${tokens.quoteBorder};background:${tokens.quoteBg};margin:0.8em 0;padding:14px 20px;border-radius:0 8px 8px 0"><p style="margin:0;color:${tokens.textPrimary};font-style:italic;line-height:1.7;font-size:1.05em">${escapeHtml(block.text)}</p>${authorHtml}</blockquote>`;
+      return `<blockquote style="border-right:4px solid ${tokens.quoteBorder};background:${tokens.quoteBg};margin:0.8em 0;padding:14px 20px;border-radius:0 8px 8px 0"><p style="margin:0;color:${tokens.textPrimary};font-style:italic;line-height:1.7;font-size:1.05em;font-weight:${tokens.textWeight}">${escapeHtml(block.text)}</p>${authorHtml}</blockquote>`;
     }
 
     case "code": {
@@ -311,7 +380,7 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
           const cells = row
             .map(
               (cell) =>
-                `<td style="padding:9px 14px;border-bottom:1px solid ${tokens.tableBorder};background:${bg};color:${tokens.textPrimary}">${wrapInline(cell, tokens)}</td>`
+                `<td style="padding:9px 14px;border-bottom:1px solid ${tokens.tableBorder};background:${bg};color:${tokens.textPrimary};font-weight:${tokens.textWeight}">${wrapInline(cell, tokens)}</td>`
             )
             .join("");
           return `<tr>${cells}</tr>`;
@@ -326,7 +395,7 @@ export function renderBlock(block: Block, tokens: ThemeTokens): string {
           const dateHtml = item.date
             ? `<span style="color:${tokens.accent};font-size:0.8em;font-weight:600">${escapeHtml(item.date)}</span>`
             : "";
-          return `<div style="display:flex;gap:14px;position:relative;padding-bottom:20px"><div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0"><div style="width:10px;height:10px;border-radius:50%;background:${tokens.accent};box-shadow:0 0 8px ${tokens.accent};flex-shrink:0;margin-top:4px"></div><div style="width:2px;flex:1;background:${tokens.border};margin-top:4px"></div></div><div style="flex:1"><div style="font-weight:700;color:${tokens.textPrimary};font-size:0.95em">${escapeHtml(item.title)}</div>${dateHtml}<div style="color:${tokens.textPrimary};line-height:1.7;margin-top:4px">${wrapInline(item.content, tokens)}</div></div></div>`;
+          return `<div style="display:flex;gap:14px;position:relative;padding-bottom:20px"><div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0"><div style="width:10px;height:10px;border-radius:50%;background:${tokens.accent};box-shadow:0 0 8px ${tokens.accent};flex-shrink:0;margin-top:4px"></div><div style="width:2px;flex:1;background:${tokens.border};margin-top:4px"></div></div><div style="flex:1"><div style="font-weight:700;color:${tokens.textPrimary};font-size:0.95em">${escapeHtml(item.title)}</div>${dateHtml}<div style="color:${tokens.textPrimary};line-height:1.7;margin-top:4px;font-weight:${tokens.textWeight}">${wrapInline(item.content, tokens)}</div></div></div>`;
         })
         .join("");
       return `<div style="margin:0.8em 0;padding-right:4px">${items}</div>`;
@@ -357,6 +426,9 @@ export function renderCoverPage(
   tokens: ThemeTokens,
   metadata: DocumentSchema["metadata"]
 ): string {
+  const iconHtml = cover.icon
+    ? `<div style="font-size:88px;line-height:1.1;margin-bottom:28px">${escapeHtml(cover.icon)}</div>`
+    : "";
   const badgeHtml = cover.badge
     ? `<div style="color:${tokens.accent};font-size:1.1em;font-weight:700;letter-spacing:2px;margin-bottom:24px">${escapeHtml(cover.badge)}</div>`
     : "";
@@ -366,12 +438,6 @@ export function renderCoverPage(
   const descHtml = cover.description
     ? `<div style="color:${tokens.textSecondary};font-size:0.95em;margin-top:20px;max-width:400px;line-height:1.6">${escapeHtml(cover.description)}</div>`
     : "";
-  const metaParts: string[] = [];
-  if (metadata.author) metaParts.push(escapeHtml(metadata.author));
-  if (metadata.date) metaParts.push(escapeHtml(metadata.date));
-  const metaHtml = metaParts.length
-    ? `<div style="color:${tokens.textSecondary};font-size:0.85em;margin-top:auto;padding-top:40px">${metaParts.join(" · ")}</div>`
-    : "";
 
   return `
 <div style="page-break-after:always;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:${tokens.background};position:relative;overflow:hidden;direction:rtl">
@@ -380,19 +446,24 @@ export function renderCoverPage(
   <div style="position:absolute;bottom:80px;left:40px;width:80px;height:80px;border:2px solid ${tokens.accent};border-radius:12px;opacity:0.1;transform:rotate(45deg)"></div>
   <div style="position:absolute;top:40%;left:20px;width:60px;height:60px;border:1px solid ${tokens.quoteBorder};border-radius:50%;opacity:0.1"></div>
   <div style="position:absolute;bottom:30%;right:30px;width:40px;height:40px;background:${tokens.accent};opacity:0.04;transform:rotate(45deg)"></div>
+  ${iconHtml}
   ${badgeHtml}
   <div style="font-size:2.4em;font-weight:800;color:${tokens.accent};line-height:1.3;max-width:600px">${escapeHtml(cover.title)}</div>
   ${subtitleHtml}
   ${descHtml}
   <div style="width:60px;height:3px;background:${tokens.accent};border-radius:2px;margin-top:28px;opacity:0.6"></div>
-  ${metaHtml}
   <div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,${tokens.accentAlt},${tokens.accent},${tokens.quoteBorder})"></div>
 </div>`;
 }
 
+/** Resolve a theme mode to its design token set (print = white page, dark bold text). */
+export function tokensForMode(mode: "dark" | "light" | "print"): ThemeTokens {
+  if (mode === "print") return designTokens.print as ThemeTokens;
+  return mode === "dark" ? designTokens.dark : designTokens.light;
+}
+
 export function buildDocumentHtml(schema: DocumentSchema): string {
-  const tokens =
-    schema.theme.mode === "dark" ? designTokens.dark : designTokens.light;
+  const tokens = tokensForMode(schema.theme.mode);
   const dir = schema.metadata.lang === "ar" ? "rtl" : "ltr";
   const fontFamily =
     schema.metadata.lang === "ar"
@@ -453,6 +524,7 @@ export function buildDocumentHtml(schema: DocumentSchema): string {
   }
 
   @media print {
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { background: ${tokens.background}; }
     .page-break { page-break-after: always; }
   }
@@ -461,9 +533,6 @@ export function buildDocumentHtml(schema: DocumentSchema): string {
 <body>
 ${coverHtml}
 ${contentHtml}
-<div style="margin-top:3em;padding:16px 0;border-top:1px solid ${tokens.divider};text-align:center;color:${tokens.textSecondary};font-size:0.78em;direction:rtl;unicode-bidi:plaintext">
-  وكيل أسامة — تم الإنشاء على الجهاز
-</div>
 </body>
 </html>`;
 }
@@ -795,7 +864,7 @@ export function generateCoverHtml(
   <div style="position:absolute;top:60px;right:60px;width:120px;height:120px;border:2px solid ${tokens.border};border-radius:50%;opacity:0.15"></div>
   <div style="position:absolute;bottom:80px;left:40px;width:80px;height:80px;border:2px solid ${tokens.accent};border-radius:12px;opacity:0.1;transform:rotate(45deg)"></div>
   <div style="position:absolute;top:40%;left:20px;width:60px;height:60px;border:1px solid ${tokens.quoteBorder};border-radius:50%;opacity:0.1"></div>
-  <div style="color:${tokens.accent};font-size:1.1em;font-weight:700;letter-spacing:2px;margin-bottom:24px">وكيل أسامة</div>
+  <div style="color:${tokens.accent};font-size:1.1em;font-weight:700;letter-spacing:2px;margin-bottom:24px">OSAMAH AGENT</div>
   <div style="font-size:2.4em;font-weight:800;color:${tokens.accent};line-height:1.3;max-width:600px">${escapeHtml(title)}</div>
   ${subtitleHtml}
   <div style="width:60px;height:3px;background:${tokens.accent};border-radius:2px;margin-top:28px;opacity:0.6"></div>

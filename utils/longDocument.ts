@@ -19,6 +19,7 @@ import type { PdfMessage } from './chatClean';
 import { cleanChatMessages, conversationToPrompt, messagesToMarkdown } from './chatClean';
 import { extractJson } from './jsonExtract';
 import { detectLang } from './taskModel';
+import { resolveCoverIcon } from './pdfPrint';
 
 export type LongLlm = (
   args: {
@@ -272,6 +273,7 @@ export async function buildLongDocument(
   if (outline.length === 0 || opts.signal?.aborted) return base;
 
   const convo = conversationToPrompt(cleaned);
+  const topicText = cleaned.find((m) => m.role === 'user')?.content ?? convo;
   const sections: Block[] = [];
   let written = 0;
   const total = outline.length;
@@ -335,7 +337,7 @@ export async function buildLongDocument(
   return {
     metadata: {
       title,
-      author: lang === 'ar' ? 'وكيل أسامة' : 'Osamah agent',
+      author: '',
       date: dateLabel,
       lang,
       description:
@@ -343,14 +345,14 @@ export async function buildLongDocument(
           ? `مستند شامل مكوّن من ${written} أقسام`
           : `Comprehensive document in ${written} sections`,
     },
-    theme: { mode: 'dark' },
+    theme: { mode: 'print' },
     cover: {
       title,
       subtitle:
         lang === 'ar'
           ? `مستند شامل في ${written} أقسام`
           : `Comprehensive document — ${written} sections`,
-      badge: 'وكيل أسامة',
+      icon: resolveCoverIcon(undefined, topicText),
     },
     sections,
   };

@@ -129,7 +129,7 @@ const Page = () => {
           <View style={[s.modelDot, { backgroundColor: DarkTextSecondary }]} />
           <View style={{ flex: 1 }}>
             <Text style={[s.modelName, { color: colors.onSurface }]}>{t('settings.control.noModel')}</Text>
-            <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>opencode</Text>
+            <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>{t('appName')}</Text>
           </View>
           <MaterialIcons
             name={!modelID ? 'check-circle' : 'radio-button-unchecked'}
@@ -152,7 +152,7 @@ const Page = () => {
             <View style={{ flex: 1 }}>
               <Text style={[s.modelName, { color: colors.onSurface }]} numberOfLines={1}>{m.id}</Text>
               <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>
-                {m.ownedBy ?? 'opencode'} · free
+                {m.ownedBy ?? t('appName')} · free
               </Text>
             </View>
             <MaterialIcons
@@ -172,7 +172,7 @@ const Page = () => {
             <View style={{ flex: 1 }}>
               <Text style={[s.modelName, { color: colors.onSurface }]} numberOfLines={1}>{m.id}</Text>
               <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>
-                {m.ownedBy ?? 'opencode'}
+                {m.ownedBy ?? t('appName')}
               </Text>
             </View>
             <MaterialIcons

@@ -21,8 +21,10 @@ const SUBTITLE: Record<TaskLevel, TKey> = {
 
 /** Task options as a compact button sitting next to the chat input; pressing it
  *  reveals the three options in a small floating panel above the field
- *  (absolute inside the input container). Self-contained: loads the persisted
- *  choice, saves on tap, reports changes up to attach the prompt directive. */
+ *  (absolute inside the input container). The options stack VERTICALLY, each
+ *  showing its icon + title + one-line description. Self-contained: loads the
+ *  persisted choice, saves on tap, reports changes up to attach the prompt
+ *  directive. */
 export function TaskTypeSelector({ onChange }: { onChange?: (level: TaskLevel) => void }) {
   const { colors } = useTheme();
   const { t } = useI18n();
@@ -119,7 +121,7 @@ const styles = StyleSheet.create({
     bottom: 48,
     left: 8,
     right: 8,
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 6,
     borderRadius: 14,
     borderWidth: 1,
@@ -132,14 +134,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   chip: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     borderRadius: 10,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
   },
   label: {
     ...(typography.labelSmall as any),

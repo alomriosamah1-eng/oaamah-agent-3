@@ -1,8 +1,11 @@
+import Constants from 'expo-constants';
 import { fetch as expoFetch } from 'expo/fetch';
 import { keyStorage, storage } from '@/utils/Storage';
 
 // The app connects to the opencode server automatically.
-// Candidates are tried in order: a stored override (if any), the mDNS
+// Candidates are tried in order: a stored override (if any), the Metro host
+// (Expo Go / dev — the machine serving the bundle is also where `opencode
+// serve` runs, so its host is auto-discovered on the same Wi-Fi), the mDNS
 // hostname advertised by `opencode serve --mdns` (opencode.local), then
 // localhost for running opencode on the same machine.
 export const DEFAULT_OPENCODE_URL = 'http://opencode.local:4096';
@@ -23,6 +26,14 @@ const serverCandidates = async (): Promise<string[]> => {
   const stored = await getServerUrl();
   const list: Array<string> = [];
   if (stored) list.push(stored);
+  // Metro host: "192.168.1.50:8081" → "http://192.168.1.50:4096". Expo Go
+  // reliably exposes it as `expoConfig.hostUri`; `expoGoConfig.debuggerHost`
+  // is the classic fallback for older manifests.
+  const hostUri =
+    (Constants.expoConfig?.hostUri ?? '').trim() ||
+    ((Constants.expoGoConfig as { debuggerHost?: string | null } | null)?.debuggerHost ?? '').trim();
+  const host = hostUri.split(':')[0];
+  if (host) list.push(`http://${host}:4096`);
   list.push(
     // mDNS advertised by `npm run server` (opencode serve --mdns): works on
     // devices on the same Wi-Fi as the machine hosting the project.

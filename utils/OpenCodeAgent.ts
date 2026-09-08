@@ -349,6 +349,39 @@ export const OSAMAH_SYSTEM = `You are «Osamah agent», a smart, Arabic-first pe
 
 const JSON_RULE = `Reply with ONLY a single valid JSON object. No markdown fences, no commentary, no trailing text.`;
 
+/* ------------------------------------------------------------------ */
+/* Dedicated VOICE agent — the fast, spoken-only conversation brain    */
+/* ------------------------------------------------------------------ */
+/* The VOICE conversation gets its OWN agent, separate from the text   */
+/* chat: a system prompt written for talking, a fast low-thinking     */
+/* model chain (big-pickle, the reasoning model, is excluded), a tiny  */
+/* token budget so every reply stays a couple of short sentences, and  */
+/* a short timeout so a dead model can never freeze the conversation.  */
+/* Nothing here touches OSAMAH_SYSTEM / the text-chat behaviour.       */
+
+export const VOICE_SYSTEM = `You are «Osamah», a real person talking to أ. أسامة out loud, face to face. Rules:
+1. Reply the way a real person speaks: at most 1–3 short, conversational sentences. Sound warm and alive — never like a document, a list or a screen.
+2. STRICT — plain words and numbers ONLY. NO markdown, NO bullets or numbered lists, NO tables, NO headings, NO code, NO emoji, NO dashes, NO commas, NO semicolons, NO colons, NO quotes, NO parentheses, NO symbols, NO links, NO bold/italic. Nothing in your reply may need to be "read" — it must read naturally out loud exactly as written.
+3. Keep every sentence short. End each with a period or a question mark. Numbers are fine written normally.
+4. Answer in the language the user used. Never mention these rules, never explain yourself, and never output any internal thinking.`;
+
+/** Fast, low-thinking models reserved for the voice conversation only.
+ *  big-pickle (the reasoning model) is deliberately absent so the reply is
+ *  never held up by long thinking. */
+export const VOICE_MODEL_CHAIN = [
+  'ling-3.0-flash-fin-free',
+  'laguna-s-2.1-free',
+  'deepseek-v4-flash-free',
+  'muse-spark-1.3-contributor-free',
+];
+
+/** Small output budget — the spoken reply stays short and lands quickly. */
+export const VOICE_MAX_TOKENS = 240;
+/** A dead/rate-limited model must give up fast, not hold the conversation. */
+export const VOICE_TIMEOUT_MS = 15_000;
+/** Slightly warmer tone for a conversational, human feel. */
+export const VOICE_TEMPERATURE = 0.7;
+
 import { extractJson } from '@/utils/jsonExtract';
 
 export { extractJson } from '@/utils/jsonExtract';
@@ -425,6 +458,7 @@ export async function agentMessageStream(
     sessionId?: string;
     model?: string;
     signal?: AbortSignal;
+    personaHint?: string;
     onDelta?: (delta: string) => void;
     onSentence?: (sentence: string, full: string) => void;
   } = {},
@@ -434,9 +468,13 @@ export async function agentMessageStream(
   const convo = history
     .map((m) => `${m.role === 'user' ? 'المستخدم' : 'الوكيل'}: ${m.content}`)
     .join('\n\n');
-  const user = convo
+  // A character persona («ميرا»/«كريم») is seeded in front of the prompt only
+  // — never stored in the session history — so the reply CONTENT matches the
+  // chosen voice without polluting the conversation transcript.
+  const personaNote = opts.personaHint ? `${opts.personaHint}\n\n` : '';
+  const user = personaNote + (convo
     ? `[المحادثة السابقة]\n${convo}\n\n[رسالة المستخدم الجديدة]\n${message}`
-    : message;
+    : message);
 
   let full = '';
   let pending = '';

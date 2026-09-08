@@ -62,6 +62,8 @@
     "extra": {
       "zenApiKey": "",
       "voiceGatewayUrl": "http://192.168.0.232:8100",
+      "voiceApiKeys": [],
+      "voiceTtsKeys": [],
       "ytApiKey": "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90",
       "ytApiKeys": [
         "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90"

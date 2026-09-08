@@ -61,15 +61,39 @@ export function FlowVideoUnit({ source, quality, onQualityChange, onPlaybackChan
   const controlsOpacity = useRef(new Animated.Value(0)).current;
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Local mirrors so the volume/mute UI reflects a change immediately, even on
+  // platforms where assigning `player.volume`/`player.muted` does not emit the
+  // volumeChange/mutedChange events (the slider would otherwise appear stuck).
+  const [volState, setVolState] = useState(1);
+  const [mutedState, setMutedState] = useState(false);
+  const volStateRef = useRef(1);
+  const mutedStateRef = useRef(false);
+  const changeVolUI = (v: number) => {
+    volStateRef.current = v;
+    setVolState(v);
+  };
+  const changeMutedUI = (m: boolean) => {
+    mutedStateRef.current = m;
+    setMutedState(m);
+  };
+  // Sync mirrors with the player's authoritative events (also covers the
+  // persisted default load below).
+  // (sync effects live after the useEvent declarations below)
+
   // App settings: volume + mute, persisted in AsyncStorage.
+  // Sound always STARTS OPEN — the persisted mute state is never re-applied on
+  // a fresh reel. If the user mutes a video, the mute button inside the volume
+  // panel still works for that video, but every new video begins unmuted.
   useEffect(() => {
     if (appliedDefaults.current) return;
     appliedDefaults.current = true;
     (async () => {
       const vol = Number((await storage.getString(VOLUME_KEY)) ?? '1');
-      const muted = (await storage.getString(MUTED_KEY)) === '1';
-      player.volume = Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 1;
-      player.muted = muted;
+      const clamped = Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 1;
+      changeVolUI(clamped);
+      changeMutedUI(false);
+      player.volume = clamped;
+      player.muted = false;
     })();
   }, [player]);
 
@@ -89,6 +113,17 @@ export function FlowVideoUnit({ source, quality, onQualityChange, onPlaybackChan
   const { status } = useEvent(player, 'statusChange', { status: player.status });
   const { volume } = useEvent(player, 'volumeChange', { volume: player.volume });
   const { muted } = useEvent(player, 'mutedChange', { muted: player.muted });
+
+  // Sync local mirrors with the player's authoritative events (also covers the
+  // persisted default load above).
+  useEffect(() => {
+    if (volStateRef.current !== volume) changeVolUI(volume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [volume]);
+  useEffect(() => {
+    if (mutedStateRef.current !== muted) changeMutedUI(muted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted]);
 
   const [duration, setDuration] = useState(0);
   useEffect(() => {
@@ -143,14 +178,19 @@ export function FlowVideoUnit({ source, quality, onQualityChange, onPlaybackChan
 
   const setVolume = (v: number) => {
     player.volume = v;
-    if (v > 0 && player.muted) player.muted = false;
+    if (v > 0 && mutedStateRef.current) {
+      player.muted = false;
+      changeMutedUI(false);
+    }
+    changeVolUI(v);
     storage.set(VOLUME_KEY, String(v));
     showControls();
   };
 
   const toggleMute = () => {
-    const next = !player.muted;
+    const next = !mutedStateRef.current;
     player.muted = next;
+    changeMutedUI(next);
     storage.set(MUTED_KEY, next ? '1' : '0');
     showControls();
   };
@@ -222,16 +262,31 @@ export function FlowVideoUnit({ source, quality, onQualityChange, onPlaybackChan
 
         {/* Volume + quality controls pill */}
         <View style={[styles.pill, { bottom: 40 + bottomInset }]}>
-          <Pressable hitSlop={6} onPress={toggleMute} style={styles.pillBtn}>
-            <MaterialIcons name={muted || volume === 0 ? 'volume-off' : 'volume-up'} size={18} color="#FFFFFF" />
+          <Pressable
+            hitSlop={6}
+            onPress={() => {
+              // Opening the volume panel IS the action here — the icon used to
+              // only toggle mute, which felt broken (nothing visibly happened).
+              setPanel(panel === 'controls' ? 'none' : 'controls');
+              showControls();
+            }}
+            style={styles.pillBtn}>
+            <MaterialIcons name={mutedState || volState === 0 ? 'volume-off' : 'volume-up'} size={18} color="#FFFFFF" />
           </Pressable>
           {panel === 'controls' && (
             <View style={styles.panel}>
               <View style={styles.panelRow}>
-                <MaterialIcons name="volume-up" size={16} color={CyanNeon} />
-                <SeekSlider value={muted ? 0 : volume} onSeek={setVolume} style={styles.panelSlider} color={CyanNeon} />
+                <Text style={styles.seekLabel}>{t('flow.volume')}</Text>
+                <SeekSlider value={mutedState ? 0 : volState} onSeek={setVolume} style={styles.panelSlider} color={CyanNeon} />
               </View>
-              <Text style={styles.panelLabel}>{t('flow.volume')}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <Pressable hitSlop={6} onPress={toggleMute} style={styles.pillBtn}>
+                  <MaterialIcons name={mutedState ? 'volume-off' : 'volume-up'} size={16} color={mutedState ? '#EF4444' : '#FFFFFF'} />
+                </Pressable>
+                <Text style={styles.panelHint}>
+                  {mutedState ? '0%' : `${Math.round((volState || 0) * 100)}%`}
+                </Text>
+              </View>
             </View>
           )}
           <Pressable
@@ -352,7 +407,8 @@ const styles = StyleSheet.create({
   },
   panelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   panelSlider: { flex: 1, height: 24 },
-  panelLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 10, marginTop: 2 },
+  seekLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 10, marginTop: 0 },
+  panelHint: { color: 'rgba(255,255,255,0.6)', fontSize: 10, textAlign: 'center', marginTop: 4 },
   qualityRow: {
     position: 'absolute',
     right: 14,

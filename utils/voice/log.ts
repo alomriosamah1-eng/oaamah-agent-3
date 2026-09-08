@@ -12,7 +12,8 @@ export type VoiceLogTag =
   | 'VOICE_STREAM_COMPLETED'
   | 'VOICE_CANCELLED'
   | 'VOICE_ERROR'
-  | 'VOICE_CONFIG';
+  | 'VOICE_CONFIG'
+  | 'VOICE_REPLY_LATENCY';
 
 export function voiceLog(tag: VoiceLogTag, detail?: string): void {
   if (!DEV_VOICE_LOGGING) return;

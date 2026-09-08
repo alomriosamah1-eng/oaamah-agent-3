@@ -136,8 +136,12 @@ export const BASE_PROFILES: Record<string, ModeOpts> = {
     lonDensity: 42,
     rBase: 0.6,
     rDepth: 1.7,
-    inkFar: 0.66,
-    inkSpan: 0.56,
+    // Kept bright and saturated across the whole shell: the ink starts high
+    // and falls only ~0.36 over the depth span, so even the far side keeps
+    // its hue instead of sinking to black — the dots stay distinct and vivid
+    // against the orb's coloured glow body.
+    inkFar: 0.82,
+    inkSpan: 0.36,
     rsPow: 0.6,
     rMin: 0.3,
   },

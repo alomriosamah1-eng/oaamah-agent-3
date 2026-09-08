@@ -70,3 +70,7 @@ export { recordPicture } from './engine/paint';
 // loop: call it on the filled buffer before recording.
 export { applyVoicePass } from './engine/voice-pass';
 export { buildColorLUT, parseTint, type ColorLUT } from './colors';
+
+// The gallery — 15 hand-drawn voiceorbs styles behind the same lifecycle
+// contract, with a settings picker that previews each one live.
+export * from './gallery';

@@ -214,7 +214,7 @@ async function callInnertube(ytId: string): Promise<any | null> {
   for (const suffix of attempts) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8_000);
+      const timer = setTimeout(() => controller.abort(), 4_000);
       const res = await fetch(`https://www.youtube.com/youtubei/v1/player${suffix}`, {
         method: 'POST',
         headers: {
@@ -335,25 +335,22 @@ export async function resolveStream(
   const cached = await getCachedStream(db, ytId);
   if (cached) return cached;
 
-  // Direct YouTube extraction (most reliable)
-  const innertube = pickInnertube(await callInnertube(ytId), quality);
-  if (innertube) {
-    await setCachedStream(db, ytId, innertube);
-    return innertube;
-  }
+  // Race the providers instead of waiting on each in turn, so the first
+  // usable stream (typically direct Innertube) wins as early as possible.
+  // This is what actually removes the "video appears only after several
+  // seconds of network attempts" feeling on the first/uncached reels.
+  const [innertube, piped, invidious] = await Promise.all([
+    callInnertube(ytId).then((data) => pickInnertube(data, quality)),
+    tryPiped(ytId, quality),
+    tryInvidious(ytId, quality),
+  ]);
 
-  // Piped instances (auto-updated, health-ordered)
-  const piped = await tryPiped(ytId, quality);
-  if (piped) {
-    await setCachedStream(db, ytId, piped);
-    return piped;
-  }
-
-  // Invidious instances
-  const invidious = await tryInvidious(ytId, quality);
-  if (invidious) {
-    await setCachedStream(db, ytId, invidious);
-    return invidious;
+  // Direct YouTube extraction (most reliable) first, then fallbacks by rank.
+  const fallbacks = [piped, invidious].filter((s): s is ResolvedStream => !!s);
+  const stream = innertube ?? fallbacks[0] ?? null;
+  if (stream) {
+    await setCachedStream(db, ytId, stream);
+    return stream;
   }
 
   return null;

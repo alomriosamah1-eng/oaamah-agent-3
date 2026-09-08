@@ -61,6 +61,33 @@ test('instruction prompt embeds skill rules and output-only rule', () => {
   assert(/أنت متخصص في هندسة البرومبتات/.test(ar), 'arabic persona');
 });
 
+test('instruction prompt adapts to the request domain, never defaults to coding', () => {
+  const sys = buildInstructionPrompt(pickSkill('writing'), 'en');
+  assert(/never default it to coding/i.test(sys), 'no coding default (en)');
+  const ar = buildInstructionPrompt(pickSkill('creative'), 'ar');
+  assert(/لا تخصّصه للبرمجة افتراضيًا/.test(ar), 'no coding default (ar)');
+});
+
+test('agent forwards onPartial streaming progress', async () => {
+  let seen = 0;
+  const agent = new PromptMakerAgent(async (req) => {
+    if (req.onPartial) {
+      req.onPartial('```prompt\n# Role\nDraft');
+      req.onPartial('```prompt\n# Role\nDraft plus');
+    }
+    return '```prompt\n# Role\nAct as a copywriter for a fashion brand.\n```';
+  });
+  const out = await agent.generate('اكتب برومبتاً لكاتب إعلانات لماركة أزياء', {
+    lang: 'ar',
+    onPartial: () => {
+      seen += 1;
+    },
+  });
+  assertEqual(seen, 2, 'partial forwarded twice');
+  assert(!out.prompt.includes('```'), 'final clean');
+  assertEqual(out.intent, 'writing');
+});
+
 test('sanitizeOutput: strips fences and conversational lead-in', () => {
   const fenced = '```prompt\nAct as an expert. Build a tool.\n```';
   assertEqual(sanitizeOutput(fenced), 'Act as an expert. Build a tool.');

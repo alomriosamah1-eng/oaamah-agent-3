@@ -3,6 +3,11 @@
 // couple of phone-suitable knobs. No provider modes, no voice catalogue:
 // the desktop picks one neural voice by gender/language and we do the same.
 
+import type { OrbStyleId } from '../orbs/gallery';
+import { DEFAULT_GALLERY_STYLE, isGalleryStyle } from '../orbs/gallery/registry';
+import type { PersonaId } from './persona';
+import { isPersonaId } from './persona';
+
 export type VoiceGender = 'female' | 'male';
 
 export type VoiceLocale = 'ar-SY' | 'ar-SA' | 'en-US';
@@ -13,6 +18,10 @@ export interface VoiceConfig {
   speakingRate: number;
   pitch: number;
   volume: number;
+  /** Selected orb style from the voiceorbs gallery. */
+  orbStyle: OrbStyleId;
+  /** Active character: osamah (default) or ميرا / كريم by name. */
+  persona: PersonaId;
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
@@ -21,6 +30,8 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   speakingRate: 1,
   pitch: 1,
   volume: 1,
+  orbStyle: DEFAULT_GALLERY_STYLE,
+  persona: 'osamah',
 };
 
 const KEY = 'voiceConfig';
@@ -38,6 +49,10 @@ export function normalizeVoiceConfig(raw: unknown): VoiceConfig {
   }
   if (typeof o.pitch === 'number' && o.pitch > 0) base.pitch = o.pitch;
   if (typeof o.volume === 'number' && o.volume >= 0) base.volume = o.volume;
+  if (typeof o.orbStyle === 'string' && isGalleryStyle(o.orbStyle)) {
+    base.orbStyle = o.orbStyle;
+  }
+  if (isPersonaId(o.persona)) base.persona = o.persona;
   return base;
 }
 

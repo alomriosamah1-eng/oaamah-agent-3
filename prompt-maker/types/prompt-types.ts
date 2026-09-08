@@ -50,6 +50,8 @@ export interface LlmRequest {
   maxTokens?: number;
   model?: string;
   sessionKey?: string;
+  /** Optional live-feedback hook — called with the full-so-far reply text. */
+  onPartial?: (fullSoFar: string) => void;
 }
 
 export type LlmFn = (req: LlmRequest, signal?: AbortSignal) => Promise<string>;

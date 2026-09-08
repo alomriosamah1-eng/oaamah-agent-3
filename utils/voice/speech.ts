@@ -2,26 +2,19 @@
 //
 // Desktop order (floating_assistant.py `_speak_sync`): edge-tts first (streamed
 // neural audio), then a local fallback. Here edge-tts is reached through the
-// voice gateway (`/voice/tts`, MP3) and played with the injected expo-audio
-// player; if the gateway fails the platform's own speech engine (expo-speech)
-// serves the same fallback role as the desktop's gTTS/espeak.
+// voice gateway (`/voice/tts`, MP3). Synthesis is separated from playback so
+// the conversation loop can PREFETCH the next sentence while the current one
+// is still speaking — that overlap is what removes the gap between sentences.
+// If the gateway/cloud fails, the platform's own engine (expo-speech) serves
+// the same fallback role as the desktop's gTTS/espeak.
 //
 // Voice pick mirrors the desktop: Arabic text → the Arabic neural voice chosen
 // by the configured gender, anything else → an English neural voice.
 
-import { splitChunks } from './text';
-import { gatewayTts } from './providers/gateway';
+import { speakableText, splitChunks, applyPronunciationLexicon } from './text';
+import { ttsRouter } from './providers/ttsRouter';
 import type { VoiceConfig } from './config';
 import { voiceLog } from './log';
-
-/** The concrete audio output the loop talks to (player lives in the UI layer). */
-export interface SpeechAudio {
-  /** Play a remote/local audio URI to completion. Resolves on finish or stop. */
-  play(uri: string): Promise<void>;
-  setVolume(volume: number): void;
-  /** Stop whatever is playing and resolve any pending play(). */
-  stop(): void;
-}
 
 /** Desktop `has_arabic()`: any char in the Arabic block counts. */
 export function hasArabic(text: string): boolean {
@@ -32,46 +25,68 @@ export interface SpeakOptions {
   signal?: AbortSignal;
 }
 
+// Microsoft Edge neural voices, one per gender × dialect. The Syrian pair
+// (Amany/Laith) reads Levantine; the MSA pair (ar-SA) reads Modern Standard
+// Arabic. English keeps the SAME gender as the Arabic voice — otherwise a
+// bilingual reply would be spoken by two different people in one turn.
+// Both genders share the same rate/pitch — only the timbre differs — so
+// switching takes nothing else with it.
 const EDGE_VOICES = {
   female_ar_sy: 'ar-SY-AmanyNeural',
   male_ar_sy: 'ar-SY-LaithNeural',
+  female_ar_sa: 'ar-SA-ZariyahNeural',
+  male_ar_sa: 'ar-SA-HamedNeural',
   en: 'en-US-AriaNeural',
+  female_en: 'en-US-AriaNeural',
+  male_en: 'en-US-GuyNeural',
 } as const;
 
 /** Each synthesized chunk must fit the gateway's 1000-char cap. */
 const GATEWAY_MAX_CHARS = 700;
 
-/**
- * Speak `text` (possibly split into chunks, like the desktop plays the reply
- * as it is produced) over the configured voice. Falls back to the platform TTS
- * per chunk when the gateway is unreachable, so a reply always comes out.
- */
-export async function speak(
-  text: string,
-  config: VoiceConfig,
-  audio: SpeechAudio,
-  opts: SpeakOptions = {},
-): Promise<void> {
-  if (!text.trim()) return;
+/** Resolve the voice id + request locale for a piece of text. */
+function pickVoice(config: VoiceConfig, text: string): { voice: string; locale: string } {
   const language = hasArabic(text) ? 'ar' : 'en';
   const voice =
     language === 'en'
-      ? EDGE_VOICES.en
-      : config.gender === 'male'
-        ? EDGE_VOICES.male_ar_sy
-        : EDGE_VOICES.female_ar_sy;
-  const locale = language === 'en' ? 'en-US' : config.locale;
+      ? config.gender === 'male'
+        ? EDGE_VOICES.male_en
+        : EDGE_VOICES.female_en
+      : config.locale === 'ar-SA'
+        ? config.gender === 'male'
+          ? EDGE_VOICES.male_ar_sa
+          : EDGE_VOICES.female_ar_sa
+        : config.gender === 'male'
+          ? EDGE_VOICES.male_ar_sy
+          : EDGE_VOICES.female_ar_sy;
+  return { voice, locale: language === 'en' ? 'en-US' : config.locale };
+}
+
+/**
+ * Synthesize `text` into local audio file(s) — NO playback. Returns the uris
+ * (normally one) or null when remote synthesis produced nothing (the caller
+ * falls back to the platform TTS). The first syllable can start as soon as its
+ * file exists, while later sentences are still synthesizing.
+ */
+export async function synthesizeSpeech(
+  text: string,
+  config: VoiceConfig,
+  opts: SpeakOptions = {},
+): Promise<{ uris: string[] } | null> {
+  if (!text.trim()) return null;
+  // Only real text and numbers may reach the voice — strip emojis, links and
+  // decorative symbols regardless of which provider ends up synthesizing.
+  text = applyPronunciationLexicon(speakableText(text));
+  if (!text.trim()) return null;
+  const { voice, locale } = pickVoice(config, text);
 
   const chunks = splitChunks(text, GATEWAY_MAX_CHARS);
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    if (opts.signal?.aborted) return;
-
-    let played = false;
+  const uris: string[] = [];
+  for (const chunk of chunks) {
+    if (opts.signal?.aborted) return null;
     try {
-      const { uri } = await gatewayTts(
+      const out = await ttsRouter(
         {
-          provider: 'azure',
           text: chunk,
           locale,
           gender: config.gender,
@@ -82,27 +97,26 @@ export async function speak(
         },
         opts.signal,
       );
-      voiceLog('VOICE_STREAM_STARTED', `edge-tts ${chunk.length}ch`);
-      await audio.play(uri);
-      played = true;
-      voiceLog('VOICE_STREAM_COMPLETED', 'edge-tts-done');
+      if (!out) break; // gateway/cloud unavailable — native fallback follows
+      uris.push(out.uri);
+      voiceLog('VOICE_STREAM_STARTED', `tts ${chunk.length}ch`);
     } catch {
-      // gateway unreachable/timed out — desktop parity: local engine fallback
-      if (opts.signal?.aborted) return;
-    }
-    if (!played) {
-      await speakNative(chunk, locale, config, opts.signal);
+      break; // a provider blew up — fall back to the platform TTS
     }
   }
+  if (!uris.length) return null;
+  return { uris };
 }
 
 /** expo-speech fallback — the phone's equivalent of the desktop's local TTS. */
-async function speakNative(
+export async function speakNativeSpeech(
   text: string,
-  locale: string,
   config: VoiceConfig,
   signal?: AbortSignal,
 ): Promise<void> {
+  text = applyPronunciationLexicon(speakableText(text));
+  if (!text.trim()) return;
+  const { locale } = pickVoice(config, text);
   const SpeechModule = await import('expo-speech').catch(() => null);
   if (!SpeechModule) return;
   voiceLog('VOICE_STREAM_STARTED', `native ${text.length}ch`);

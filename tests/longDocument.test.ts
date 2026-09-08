@@ -11,6 +11,7 @@ import {
   sanitizeBlocks,
 } from '../utils/longDocument';
 import { PdfMessage } from '../utils/chatClean';
+import { coverIconFor } from '../utils/pdfPrint';
 import { assert, assertEqual, makeSuite } from './helpers';
 
 const { test, report } = makeSuite('longDocument');
@@ -102,8 +103,9 @@ test('buildLongDocument: plans, writes sections, wraps DocumentSchema', async ()
 
   assertEqual(calls, 3, '1 outline + 2 sections');
   assertEqual(schema.metadata.lang, 'ar');
-  assertEqual(schema.theme.mode, 'dark');
-  assertEqual(schema.cover?.badge, 'وكيل أسامة');
+  assertEqual(schema.theme.mode, 'print');
+  assertEqual(schema.cover?.icon, coverIconFor('اكتب مستنداً شاملاً عن الذكاء الاصطناعي، 100 صفحة'));
+  assertEqual(schema.cover?.badge, undefined);
   assertEqual(schema.sections.length, 6); // 2 sections × (heading + 2 paragraphs)
   const first = schema.sections[0];
   if (first.type !== 'heading') {
