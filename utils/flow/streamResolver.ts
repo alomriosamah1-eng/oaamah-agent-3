@@ -24,8 +24,6 @@ export function streamFitsQuality(cached: ResolvedStream | undefined | null, tar
   return h >= 240 && h <= 720;
 }
 
-// Public key shipped by the Android YouTube app (used for labelled requests).
-const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 const INNERTUBE_ANDROID = {
   clientName: 'ANDROID',
   clientVersion: '20.05.41',
@@ -210,7 +208,9 @@ async function callInnertube(ytId: string): Promise<any | null> {
     context: { client: { ...INNERTUBE_ANDROID } },
     videoId: ytId,
   };
-  const attempts = [``, `?key=${INNERTUBE_KEY}`];
+  // Do not ship a Google API key in the client. The unauthenticated request
+  // is followed by the existing Piped/Invidious failover when unavailable.
+  const attempts = [''];
   for (const suffix of attempts) {
     try {
       const controller = new AbortController();

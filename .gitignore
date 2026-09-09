@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+.venv/
 
 # Expo
 .expo/
@@ -42,6 +43,7 @@ expo-env.d.ts
 # @end expo-cli
 
 .env
+.voice.env
 ios/
 android/
 

@@ -253,26 +253,18 @@ function pushKeys(keys: Array<keyof UserProfile>, list: Array<keyof UserProfile>
 }
 
 export function buildProfileContext(profile: UserProfile, requestLanguage: 'ar' | 'en'): string | null {
-  const keys: Array<keyof UserProfile> = [];
-
-  if (profile.preferredName || profile.name) {
-    pushKey(keys, profile.preferredName ? 'preferredName' : 'name');
-  }
-  if (hasValue(profile.technicalLevel)) {
-    pushKeys(keys, ['profession', 'technicalLevel', 'specialization', 'field', 'skillLevel']);
-  }
-  if (hasValue(profile.researchDepth)) {
-    pushKeys(keys, ['field', 'specialization', 'researchDepth']);
-  }
-  if (profile.explanationStyle) {
-    pushKeys(keys, ['education', 'explanationStyle', 'technicalLevel']);
-  }
-  if (hasValue(profile.specialization) || profile.productionGoals.length > 0) {
-    pushKeys(keys, ['productionGoals', 'specialization', 'preferredOutputFormat']);
-  }
-  if (hasValue(profile.responseLength)) {
-    pushKey(keys, 'responseLength');
-  }
+  // Always expose every populated profile dimension in a stable priority
+  // order. The previous conditional grouping omitted interests, goals, tone,
+  // and language when no technical-level field was set, so the agent and FLOW
+  // could appear to ignore a valid profile.
+  const keys: Array<keyof UserProfile> = [
+    'preferredName', 'name', 'profession', 'specialization', 'field',
+    'education', 'experience', 'interests', 'preferredTopics', 'goals',
+    'learningGoals', 'productionGoals', 'technicalLevel', 'skillLevel',
+    'preferredLanguage', 'preferredTone', 'responseLength', 'researchDepth',
+    'explanationStyle', 'preferredOutputFormat', 'preferredFileTypes',
+    'preferredDesignStyle',
+  ];
 
   const lines: string[] = [];
   let words = 0;

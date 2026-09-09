@@ -50,24 +50,23 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 29
+            "minSdkVersion": 26
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "zenApiKey": "",
-      "voiceGatewayUrl": "http://192.168.0.232:8100",
+      "voiceGatewayUrl": "",
       "voiceApiKeys": [],
       "voiceTtsKeys": [],
-      "ytApiKey": "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90",
-      "ytApiKeys": [
-        "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90"
-      ]
+      "ytApiKey": "",
+      "ytApiKeys": []
     }
   }
 }

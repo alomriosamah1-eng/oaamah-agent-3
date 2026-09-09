@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import { fetch as streamingFetch } from 'expo/fetch';
 
 import { storage } from '@/utils/Storage';
-import { createSession, resetServerCache, resolveServer, sendMessage, streamMessage } from '@/utils/Opencode';
+import { createSession, getModels, resetServerCache, resolveServer, sendMessage, streamMessage } from '@/utils/Opencode';
 
 /**
  * In-app agent engine — the opencode agent runs INSIDE the app.
@@ -34,12 +34,12 @@ export function resetServerSession(): void {
   resetServerCache();
 }
 
-async function resolveServerSession(key: string, signal?: AbortSignal): Promise<string> {
+async function resolveServerSession(key: string, model?: string, signal?: AbortSignal): Promise<string> {
   const existing = serverSessions.get(key);
   if (existing) return existing;
   const session = await createSession({
     title: 'Osamah agent',
-    model: SERVER_MODEL,
+    model: model ? { id: model, providerID: 'opencode' } : SERVER_MODEL,
     signal,
   });
   serverSessions.set(key, session.id);
@@ -57,13 +57,14 @@ async function serverChat(
   timeoutMs: number,
   signal?: AbortSignal,
   onDelta?: (fullSoFar: string) => void,
+  model?: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   signal?.addEventListener('abort', () => controller.abort(), { once: true });
   try {
     await resolveServer(controller.signal);
-    const sessionId = await resolveServerSession(sessionKey, controller.signal);
+    const sessionId = await resolveServerSession(sessionKey, model, controller.signal);
     const text = system ? `[System instructions]\n${system}\n\n${userPrompt}` : userPrompt;
     const reply = onDelta
       ? await streamMessage(sessionId, text, { signal: controller.signal, onDelta })
@@ -99,6 +100,14 @@ const COOLDOWN_MS = 4 * 60_000;
 
 /** Maximum tokens in a single assistant reply. */
 const DEFAULT_MAX_TOKENS = 2400;
+
+/**
+ * Text chat and Prompt Maker may run planning, file, or multi-step work. Their
+ * default must not be confused with the intentionally short voice timeout;
+ * individual callers can still pass a smaller explicit timeout when needed.
+ */
+const DEFAULT_COMPLETE_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_STREAM_TIMEOUT_MS = 5 * 60_000;
 
 /** Optional baked-in key (never shown in the UI). */
 function zenApiKey(): string {
@@ -197,41 +206,18 @@ async function requestModel(model: string, payload: ChatCompletionPayload, timeo
 
 /** Single-shot completion with automatic model switching on quota/token exhaustion. */
 export async function chatComplete(args: ChatArgs, signal?: AbortSignal): Promise<string> {
-  if (useServerFirst(args)) {
-    try {
-      return await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 90_000, signal);
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      // server unreachable/failed — fall through to the Zen gateway
-    }
-  }
-  const chain = args.chain && args.chain.length > 0 ? args.chain : args.model ? [args.model, ...DEFAULT_MODEL_CHAIN.filter((m) => m !== args.model)] : DEFAULT_MODEL_CHAIN;
-  const payload = {
-    model: '', // set per attempt below
-    messages: [
-      ...(args.system ? [{ role: 'system', content: args.system }] : []),
-      { role: 'user', content: args.user },
-    ],
-    temperature: args.temperature ?? 0.6,
-    max_tokens: args.maxTokens ?? DEFAULT_MAX_TOKENS,
-  };
-  const timeoutMs = args.timeoutMs ?? 90_000;
-  let lastError: unknown = null;
-  for (let pass = 0; pass < 2; pass++) {
-    if (pass > 0 && !signal?.aborted) await sleep(2500);
-    for (const model of availableModels(chain)) {
-      try {
-        return await requestModel(model, { ...payload, model }, timeoutMs, signal);
-      } catch (e) {
-        if (signal?.aborted) throw e;
-        penalize(model);
-        lastError = e;
-      }
-    }
-    if (signal?.aborted) break;
-  }
-  throw new AgentUnavailableError(
-    lastError instanceof Error ? lastError.message : 'all opencode models unavailable',
+  // All agent, chat, prompt-maker and voice requests belong to OpenCode.
+  // In particular, never fall back to the public Zen endpoint here: its free
+  // tier rejects direct mobile requests and the YouTube/Reels key chain is a
+  // separate concern owned by utils/apiHub/store.ts.
+  return serverChat(
+    args.user,
+    args.system,
+    args.sessionKey ?? 'agent',
+    args.timeoutMs ?? DEFAULT_COMPLETE_TIMEOUT_MS,
+    signal,
+    undefined,
+    args.model,
   );
 }
 
@@ -243,34 +229,20 @@ export async function chatStream(
   args: ChatArgs & { onDelta: (delta: string) => void },
   signal?: AbortSignal,
 ): Promise<string> {
-  if (useServerFirst(args)) {
-    try {
-      const full = await serverChat(args.user, args.system, args.sessionKey ?? 'agent', args.timeoutMs ?? 240_000, signal, args.onDelta);
-      args.onDelta(full);
-      return full;
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      // server unreachable/failed — fall through to the Zen gateway
-    }
-  }
-  const chain = args.chain && args.chain.length > 0 ? args.chain : args.model ? [args.model, ...DEFAULT_MODEL_CHAIN.filter((m) => m !== args.model)] : DEFAULT_MODEL_CHAIN;
-  let lastError: unknown = null;
-  for (let pass = 0; pass < 2; pass++) {
-    if (pass > 0 && !signal?.aborted) await sleep(2500);
-    for (const model of availableModels(chain)) {
-      try {
-        return await streamFrom(model, args, signal);
-      } catch (e) {
-        if (signal?.aborted) throw e;
-        penalize(model);
-        lastError = e;
-      }
-    }
-    if (signal?.aborted) break;
-  }
-  throw new AgentUnavailableError(
-    lastError instanceof Error ? lastError.message : 'all opencode models unavailable',
+  // Streaming uses the same OpenCode session transport as normal chat. The
+  // model chain is passed to OpenCode through its configured model selection;
+  // it is never sent to Zen directly from the device.
+  const full = await serverChat(
+    args.user,
+    args.system,
+    args.sessionKey ?? 'agent',
+    args.timeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS,
+    signal,
+    args.onDelta,
+    args.model,
   );
+  args.onDelta(full);
+  return full;
 }
 
 async function streamFrom(
@@ -345,7 +317,8 @@ export const OSAMAH_SYSTEM = `You are «Osamah agent», a smart, Arabic-first pe
 2. Be concise — never dump long unbroken paragraphs. Use at most one emoji per section.
 3. For explanations, end with a short summary and a gentle follow-up question to keep the conversation going.
 4. Never invent facts; base answers on your general knowledge and clearly say when something requires up-to-date or user-specific data.
-5. NEVER include your internal reasoning, thinking process, or drafts in the reply — output only the final polished answer.`;
+5. If the user profile provides a preferred name, use it naturally when greeting, clarifying, or personalizing a recommendation; do not repeat it in every reply.
+6. NEVER include your internal reasoning, thinking process, or drafts in the reply — output only the final polished answer.`;
 
 const JSON_RULE = `Reply with ONLY a single valid JSON object. No markdown fences, no commentary, no trailing text.`;
 
@@ -377,8 +350,8 @@ export const VOICE_MODEL_CHAIN = [
 
 /** Small output budget — the spoken reply stays short and lands quickly. */
 export const VOICE_MAX_TOKENS = 240;
-/** A dead/rate-limited model must give up fast, not hold the conversation. */
-export const VOICE_TIMEOUT_MS = 15_000;
+/** Upper bound for voice only; it does not delay fast replies. */
+export const VOICE_TIMEOUT_MS = 90_000;
 /** Slightly warmer tone for a conversational, human feel. */
 export const VOICE_TEMPERATURE = 0.7;
 
@@ -548,24 +521,12 @@ export function isFreeModel(id: string): boolean {
  */
 export async function getZenModels(signal?: AbortSignal): Promise<ZenModelInfo[]> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    try {
-      const res = await streamingFetch(`${ZEN_BASE}/models`, { signal: controller.signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json: any = await res.json();
-      const data: Array<any> = Array.isArray(json?.data) ? json.data : [];
-      return data
-        .map((m) => ({
-          id: typeof m.id === 'string' ? m.id : '',
-          ownedBy: typeof m.owned_by === 'string' ? m.owned_by : undefined,
-          free: isFreeModel(m.id),
-        }))
-        .filter((m) => m.id !== '');
-    } finally {
-      clearTimeout(timer);
-    }
+    const models = await getModels(signal);
+    return models.map((m) => ({
+      id: m.id,
+      ownedBy: m.providerID,
+      free: isFreeModel(m.id),
+    }));
   } catch {
     return [];
   }

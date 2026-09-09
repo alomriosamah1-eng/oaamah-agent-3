@@ -114,15 +114,19 @@ export function createChatVoiceAgent(opts: ChatVoiceAgentOptions) {
       (agentOpts.personaHint ? `${agentOpts.personaHint}\n\n` : '') +
       buildHistoryPrompt(history, trimmed);
 
-    // The voice reply rides the DEDICATED voice agent: the fast flash chain
-    // (never the local reasoning server), a short token budget so the reply
-    // ends quickly and is then spoken whole, and a short timeout so a dead
-    // model can never freeze the conversation.
+    // The voice reply uses the dedicated voice persona and fast model chain,
+    // but it must still go through the configured OpenCode server. The
+    // YouTube/Reels key chain is unrelated and must never be used here.
     const reply = await chatStream(
       {
         system: await system(),
         user: prompt,
-        serverFirst: false,
+        // Keep voice fast, but still send the request through OpenCode. The
+        // general selected model may be a slow reasoning model and was causing
+        // the old 15-second voice request to abort before any speech existed.
+        model: VOICE_MODEL_CHAIN.includes(agentOpts.model ?? '')
+          ? agentOpts.model
+          : VOICE_MODEL_CHAIN[0],
         chain: VOICE_MODEL_CHAIN,
         maxTokens: VOICE_MAX_TOKENS,
         temperature: VOICE_TEMPERATURE,

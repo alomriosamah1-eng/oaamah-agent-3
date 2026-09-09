@@ -189,13 +189,17 @@ export function useVoiceController(
     // re-route. Switching off recording then bouncing the session makes iOS
     // re-evaluate its output route against .playback → built-in speaker.
     const playAudio = (uri: string, signal?: AbortSignal): Promise<void> =>
-      new Promise((resolve) => {
-        const deadline = Date.now() + 20_000;
-        const done = () => {
+      new Promise((resolve, reject) => {
+        // Only guard the startup phase. Once playback has actually started,
+        // never impose a wall-clock limit: long agent replies must finish.
+        const startupDeadline = Date.now() + 8_000;
+        const onAbort = () => done();
+        const done = (error?: unknown) => {
           try {
-            signal?.removeEventListener('abort', done);
+            signal?.removeEventListener('abort', onAbort);
           } catch {}
-          resolve();
+          if (error) reject(error);
+          else resolve();
         };
         setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false })
           .then(() => setIsAudioActiveAsync(false))
@@ -206,10 +210,10 @@ export function useVoiceController(
               player.replace({ uri });
               player.play();
             } catch {
-              done();
+              done(new Error('audio playback failed'));
               return;
             }
-            signal?.addEventListener('abort', done, { once: true });
+            signal?.addEventListener('abort', onAbort, { once: true });
             let started = false;
             const poll = () => {
               const s = playerStatusRef.current;
@@ -223,8 +227,8 @@ export function useVoiceController(
                 done();
                 return;
               }
-              if (Date.now() > deadline) {
-                done();
+              if (!started && Date.now() > startupDeadline) {
+                done(new Error('audio playback timeout'));
                 return;
               }
               requestAnimationFrame(poll);

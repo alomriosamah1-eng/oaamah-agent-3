@@ -30,18 +30,10 @@ interface ToolAction {
   hintKey: TKey;
   icon: keyof typeof MaterialIcons.glyphMap;
   color: string;
-  route: '/chat' | '/promptMaker' | '/saved';
+  route: '/chat' | '/promptMaker' | '/activity';
 }
 
 const ACTIONS: ToolAction[] = [
-  {
-    key: 'newChat',
-    titleKey: 'tools.newChatTitle',
-    hintKey: 'tools.newChatHint',
-    icon: 'add-comment',
-    color: CyanNeon,
-    route: '/chat',
-  },
   {
     key: 'promptMaker',
     titleKey: 'tools.promptMakerTitle',
@@ -52,11 +44,11 @@ const ACTIONS: ToolAction[] = [
   },
   {
     key: 'history',
-    titleKey: 'tools.chatHistoryTitle',
-    hintKey: 'tools.chatHistoryHint',
+    titleKey: 'tools.activityLogTitle',
+    hintKey: 'tools.activityLogHint',
     icon: 'history',
     color: Sky,
-    route: '/saved',
+    route: '/activity',
   },
 ];
 

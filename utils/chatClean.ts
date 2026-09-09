@@ -46,6 +46,14 @@ export function messagesToMarkdown(messages: PdfMessage[]): string {
   return parts.join('\n\n');
 }
 
+/** Fallback source that cannot render the export as a speaker-labelled chat. */
+export function referenceMarkdown(messages: PdfMessage[]): string {
+  const cleaned = cleanChatMessages(messages);
+  const assistant = cleaned.filter((m) => m.role !== 'user');
+  const source = assistant.length > 0 ? assistant : cleaned;
+  return source.map((m) => m.content.trim()).filter(Boolean).join('\n\n');
+}
+
 export function conversationToPrompt(messages: PdfMessage[]): string {
   const cleaned = cleanChatMessages(messages);
   const body = cleaned

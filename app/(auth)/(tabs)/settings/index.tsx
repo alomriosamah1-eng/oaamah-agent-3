@@ -10,7 +10,7 @@ import { Spacer, Divider } from '@/theme/primitives';
 import { useI18n, TKey } from '@/i18n/provider';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
 
-type SectionKey = 'control' | 'knowledge' | 'profile' | 'chat' | 'appearance' | 'storage' | 'about';
+type SectionKey = 'control' | 'knowledge' | 'profile' | 'chat' | 'appearance' | 'storage' | 'about' | 'developer';
 
 interface AdminMeta {
   key: SectionKey;
@@ -26,6 +26,7 @@ const ADMINS: AdminMeta[] = [
   { key: 'appearance', icon: 'palette', color: Green },
   { key: 'storage', icon: 'cleaning-services', color: EmeraldGlow },
   { key: 'about', icon: 'info', color: '#FF6384' },
+  { key: 'developer', icon: 'code', color: CyanNeon },
 ];
 
 const Page = () => {

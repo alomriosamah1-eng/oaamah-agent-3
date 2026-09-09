@@ -35,7 +35,7 @@ const isPdfRequest = (text: string) => {
 
 const ChatPage = () => {
   const { colors } = useTheme();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { bottom } = useSafeAreaInsets();
   const db = useSQLiteContext();
   const [height, setHeight] = useState(0);
@@ -92,9 +92,9 @@ const ChatPage = () => {
   const [profileContext, setProfileContext] = useState('');
   useEffect(() => {
     loadProfile().then((p) => {
-      setProfileContext(buildProfileContext(p, 'ar') ?? '');
+      setProfileContext(buildProfileContext(p, lang) ?? '');
     });
-  }, [id]);
+  }, [id, lang]);
 
   useEffect(() => {
     if (id) {
@@ -251,7 +251,7 @@ const ChatPage = () => {
         const partSuffix =
           f.part && f.total
             ? lang === 'ar'
-              ? ` (الجزء ${f.part} من ${f.total})`
+              ? ` (${lang === 'ar' ? 'الجزء' : 'part'} ${f.part} ${lang === 'ar' ? 'من' : 'of'} ${f.total})`
               : ` (part ${f.part} of ${f.total})`
             : '';
         const name = `${sanitizePdfName(baseTitle)}${partSuffix}.pdf`;

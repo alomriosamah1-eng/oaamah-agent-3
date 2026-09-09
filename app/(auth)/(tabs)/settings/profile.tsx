@@ -35,9 +35,7 @@ import {
 const s = StyleSheet.create({
   card: {
     borderRadius: 16,
-    backgroundColor: 'rgba(31,41,55,0.5)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     padding: 14,
     marginBottom: 14,
   },
@@ -53,7 +51,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#F9FAFB',
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -70,7 +67,6 @@ const s = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    color: '#F9FAFB',
     fontSize: 15,
   },
   saveBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2, marginBottom: 6 },
@@ -220,7 +216,7 @@ const Page = () => {
       subtitle={t('userProfile.subtitle')}
       onBack={() => router.back()}>
       {groups.map((group) => (
-        <View key={group.key} style={s.card}>
+        <View key={group.key} style={[s.card, { backgroundColor: colors.surfaceVariant, borderColor: colors.outline }]}>
           <View style={s.groupTitle}>
             <View style={[s.iconWrap, { backgroundColor: withAlpha(group.color, 0.16) }]}>
               <MaterialIcons name={group.icon as any} size={20} color={group.color} />
@@ -299,7 +295,7 @@ const Page = () => {
                   </View>
                   <View style={s.addRow}>
                     <TextInput
-                      style={[s.multiselectInput, { backgroundColor: withAlpha(colors.surfaceVariant, 0.4), borderColor: withAlpha(colors.outline, 0.3) }]}
+                      style={[s.multiselectInput, { backgroundColor: withAlpha(colors.surfaceVariant, 0.4), borderColor: withAlpha(colors.outline, 0.3), color: colors.onSurface }]}
                       value={drafts[key as string]?.[0] ?? ''}
                       onChangeText={(v) => setDrafts((d) => ({ ...d, [key]: [v] }))}
                       onSubmitEditing={() => addChip(key, drafts[key as string]?.[0] ?? '')}
@@ -326,7 +322,7 @@ const Page = () => {
                   {labelOf(key as string)}
                 </Text>
                 <TextInput
-                  style={[s.input, { backgroundColor: withAlpha(colors.surfaceVariant, 0.4), borderColor: withAlpha(colors.outline, 0.3) }]}
+                  style={[s.input, { backgroundColor: withAlpha(colors.surfaceVariant, 0.4), borderColor: withAlpha(colors.outline, 0.3), color: colors.onSurface }]}
                   value={textGroupValue(key as string)}
                   onChangeText={(v) => {
                     setDrafts((d) => ({ ...d, [key]: [v] }));

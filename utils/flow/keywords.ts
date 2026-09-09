@@ -11,6 +11,7 @@ import { chatComplete } from '@/utils/OpenCodeAgent';
 import { storage } from '@/utils/Storage';
 
 const FLOW_KEYWORDS_KEY = 'flowKeywordsLastRefresh';
+const FLOW_PROFILE_VERSION_KEY = 'flowKeywordsProfileVersion';
 const STALE_MS = 12 * 60 * 60 * 1000; // 12 hours
 const KEYWORD_TIMEOUT_MS = 20 * 1000; // never let LLM tuning hang the feed
 
@@ -151,6 +152,7 @@ function parseKeywordJson(text: string): { keywords: string[]; avoid: string[] }
 export async function refreshFlowKeywords(db: SQLiteDatabase): Promise<void> {
   // Clear old agent keywords
   await clearAgentKeywords(db);
+  const profile = await loadProfile();
 
   // Generate new, but bound the time. When the LLM gateway is slow/unreachable
   // (or returns unusable JSON), fall back to a sensible default seed so the
@@ -179,6 +181,7 @@ export async function refreshFlowKeywords(db: SQLiteDatabase): Promise<void> {
   }
 
   await storage.set(FLOW_KEYWORDS_KEY, String(Date.now()));
+  await storage.set(FLOW_PROFILE_VERSION_KEY, String(profile.lastUpdated ?? 0));
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +190,9 @@ export async function refreshFlowKeywords(db: SQLiteDatabase): Promise<void> {
 
 export async function shouldRefreshKeywords(db: SQLiteDatabase): Promise<boolean> {
   const lastRefresh = Number((await storage.getString(FLOW_KEYWORDS_KEY)) ?? '0');
+  const profile = await loadProfile();
+  const profileVersion = Number((await storage.getString(FLOW_PROFILE_VERSION_KEY)) ?? '0');
+  if ((profile.lastUpdated ?? 0) > profileVersion) return true;
   if (Date.now() - lastRefresh >= STALE_MS) return true;
   const count = await getActiveKeywords(db);
   return count.length === 0;

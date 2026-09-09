@@ -22,6 +22,7 @@ import {
   cleanChatMessages,
   conversationToPrompt,
   messagesToMarkdown,
+  referenceMarkdown,
   PdfMessage,
 } from '@/utils/chatClean';
 import { buildLongDocument, LongLlm } from '@/utils/longDocument';
@@ -35,7 +36,7 @@ import {
 } from '@/utils/pdfPrint';
 
 // Re-exported for backward compatibility — the logic lives in utils/chatClean.ts.
-export { cleanChatMessages, messagesToMarkdown, PdfMessage };
+export { cleanChatMessages, messagesToMarkdown, referenceMarkdown, PdfMessage };
 
 /* ------------------------------------------------------------------ */
 /* Markdown → HTML (kept for backward compatibility / tool reuse)      */
@@ -276,7 +277,7 @@ export async function organizeConversation(
       sections: sanitizeSections(parsed.sections),
     };
   } catch {
-    const markdown = messagesToMarkdown(cleaned);
+    const markdown = referenceMarkdown(cleaned);
     return markdownToDocument(markdown, title);
   }
 }

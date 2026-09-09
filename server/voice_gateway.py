@@ -69,10 +69,10 @@ EDGE_VOICES = {
     "male_en": "en-US-GuyNeural",
 }
 
-GOOGLE_SPEECH_KEY = "AIzaSyBOti4mM-6x9WDnZIjIeyEU21OpBXqWBgw"
+GOOGLE_SPEECH_KEY = os.getenv("GOOGLE_SPEECH_KEY", "").strip()
 GOOGLE_SPEECH_URL = (
     "https://www.google.com/speech-api/v2/recognize"
-    f"?output=json&lang={{lang}}&key={GOOGLE_SPEECH_KEY}"
+    f"?output=json&lang={{lang}}{('&key=' + GOOGLE_SPEECH_KEY) if GOOGLE_SPEECH_KEY else ''}"
 )
 
 # Location of the `voices` directory inside this repo (for the status line).

@@ -71,10 +71,13 @@ export interface OrchestrationResult {
 
 const RETRY_DELAYS = [2000, 4000, 8000];
 const MAX_ATTEMPTS = 3;
-const PLANNING_TIMEOUT = 90_000;
-const SUBTASK_TIMEOUT_SIMPLE = 60_000;
-const SUBTASK_TIMEOUT_COMPLEX = 120_000;
-const COMPILATION_TIMEOUT = 120_000;
+// These are per-stage budgets. The overall task budget in orchestrationModel
+// remains the final safety fence, so a slow but valid long task is not aborted
+// merely because one OpenCode stage needs more time.
+const PLANNING_TIMEOUT = 3 * 60_000;
+const SUBTASK_TIMEOUT_SIMPLE = 2 * 60_000;
+const SUBTASK_TIMEOUT_COMPLEX = 5 * 60_000;
+const COMPILATION_TIMEOUT = 5 * 60_000;
 
 // ---------------------------------------------------------------------------
 // Helpers

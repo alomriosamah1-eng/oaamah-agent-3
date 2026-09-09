@@ -11,7 +11,7 @@ import { useI18n } from '@/i18n/provider';
 import { LANGUAGES } from '@/i18n/strings';
 
 const Page = () => {
-  const { colors } = useTheme();
+  const { colors, isDark, setThemeMode } = useTheme();
   const { t, lang, setLang } = useI18n();
   const router = useRouter();
 
@@ -20,8 +20,8 @@ const Page = () => {
       title={t('settings.appearance.title')}
       subtitle={t('settings.appearance.subtitle')}
       onBack={() => router.back()}>
-      <Text style={s.label}>{t('settings.appearance.language')}</Text>
-      <Text style={s.hint}>{t('settings.appearance.languageHint')}</Text>
+      <Text style={[s.label, { color: colors.onSurface }]}>{t('settings.appearance.language')}</Text>
+      <Text style={[s.hint, { color: colors.onSurfaceVariant }]}>{t('settings.appearance.languageHint')}</Text>
       <Spacer h={8} />
       <View style={{ flexDirection: 'row', gap: 10 }}>
         {LANGUAGES.map((language) => {
@@ -52,34 +52,33 @@ const Page = () => {
       <Divider />
       <Spacer h={18} />
 
-      <View style={s.tile}>
+      <Pressable onPress={() => setThemeMode(isDark ? 'light' : 'dark')} style={[s.tile, { backgroundColor: colors.surfaceVariant, borderColor: colors.outline }]}>
         <View style={[s.iconWrap, { backgroundColor: withAlpha(Green, 0.16) }]}>
-          <MaterialIcons name="dark-mode" size={22} color={Green} />
+          <MaterialIcons name={isDark ? 'light-mode' : 'dark-mode'} size={22} color={Green} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.onSurface, ...(typography.titleSmall as any), fontWeight: FontWeights.bold }}>
             {t('settings.appearance.theme')}
           </Text>
           <Text style={{ color: colors.onSurfaceVariant, ...(typography.bodySmall as any) }}>
-            {t('settings.appearance.themeValue')} — {t('settings.appearance.themeHint')}
+            {isDark ? t('settings.appearance.darkTheme') : t('settings.appearance.lightTheme')} — {isDark ? t('settings.appearance.themeHint') : t('settings.appearance.lightThemeHint')}
           </Text>
         </View>
-      </View>
+        <MaterialIcons name="swap-vert" size={22} color={colors.onSurfaceVariant} />
+      </Pressable>
     </SectionScaffold>
   );
 };
 
 const s = StyleSheet.create({
-  label: { color: '#F9FAFB', fontSize: 15, fontWeight: '600' as any },
-  hint: { color: '#9CA3AF', fontSize: 12 },
+  label: { fontSize: 15, fontWeight: '600' as any },
+  hint: { fontSize: 12 },
   tile: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     borderRadius: 16,
-    backgroundColor: 'rgba(31,41,55,0.5)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     padding: 14,
   },
   iconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

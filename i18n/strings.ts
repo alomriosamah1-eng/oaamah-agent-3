@@ -34,6 +34,10 @@ const ar = {
     connectionConfiguredHint: 'وكيل أسامة جاهز ويمكنك المحادثة',
     connectionMissing: 'غير متصل',
     connectionMissingHint: 'تحقق من اتصال الإنترنت أو اختر نموذجاً من مركز التحكم',
+    connectionOnline: 'متصل',
+    connectionUnstable: 'غير مستقر',
+    connectionOffline: 'غير متصل',
+    connectionChecking: 'جارٍ الفحص',
     connectionCta: 'اختيار نموذج',
     recentChats: 'أحدث المحادثات',
     noChats: 'لا توجد محادثات بعد. ابدأ محادثة جديدة الآن.',
@@ -63,6 +67,9 @@ const ar = {
     liked: 'إعجاب',
     prompt: 'برومبت',
     error: 'تعذّر البحث، حاول مجدداً',
+    googleResults: 'نتائج Google — متصفح داخل التطبيق',
+    googleBrowser: 'متصفح Google داخل التطبيق',
+    offlineLocal: 'بلا اتصال — البحث المحلي تلقائياً',
   },
 
   chat: {
@@ -147,6 +154,8 @@ const ar = {
     image: 'صورة',
     chatHistoryTitle: 'سجل المحادثات',
     chatHistoryHint: 'محادثاتك محفوظة محلياً — تبقى منفصلة تماماً عن الملفات.',
+    activityLogTitle: 'سجل النشاطات',
+    activityLogHint: 'كل نشاطات البحث والدردشة والبرومبتات وFLOW في مكان واحد.',
     viewHistory: 'عرض السجل',
     promptMakerTitle: 'صانع الأوامر',
     promptMakerHint: 'بنيّة وتحسين البرومبتات باحتراف',
@@ -177,6 +186,9 @@ const ar = {
     togglePlay: 'تشغيل / إيقاف مؤقت',
     endOfFeed: 'وصلت إلى نهاية الخلاصة — عدّل كلماتك لمزيد من الريلز',
   },
+
+  secondBrain: { title: 'العقل الثاني', subtitle: 'لوحة ذكية تجمع معرفتك ونشاطك في مكان واحد', personalCenter: 'مركز المعرفة الشخصي', personalHint: 'يقرأ ما تحفظه محلياً ويمنحك صورة واضحة عن استخدامك.', chats: 'المحادثات', messages: 'الرسائل', prompts: 'جلسات البرومبت', flow: 'نشاطات FLOW', insight: 'ملخص ذكي', insightText: 'لديك {total} سجلاً محلياً و{keywords} كلمة اهتمام نشطة. بياناتك تبقى على الجهاز.', openActivity: 'فتح سجل النشاطات', privacy: 'العقل الثاني يعمل محلياً، ولا يخلط بياناته مع خوادم OpenCode أو خادم الصوت أو FLOW.' },
+  activityLog: { title: 'سجل النشاطات', subtitle: 'كل ما أنجزته في البحث والدردشة والبرومبتات وFLOW', emptyTitle: 'لا توجد نشاطات بعد', emptyText: 'ستظهر هنا سجلاتك تلقائياً عند استخدام أقسام التطبيق.', chat: 'محادثة', prompt: 'جلسة صانع الأوامر' },
 
   taskType: {
     title: 'نوع المهمة',
@@ -365,8 +377,10 @@ const ar = {
       chat: { title: 'إعدادات المحادثة', subtitle: 'القراءة الصوتية' },
       appearance: { title: 'تخصيص التطبيق', subtitle: 'اللغة ومظهر الواجهة' },
       about: { title: 'عن التطبيق', subtitle: 'الهوية والإصدار والمطوّر' },
+      developer: { title: 'المطوّر', subtitle: 'Osamah Agent والدعم والتواصل' },
       storage: { title: 'إدارة التخزين', subtitle: 'تنظيف بياناتك ومساحة التطبيق' },
     },
+    developerPage: { back: 'الإعدادات', title: 'المطوّر — Osamah Agent', name: 'أسامة محمد علي سعيد العُمري', supportTitle: 'الدعم والإبلاغ عن المشاكل', supportText: 'إذا واجهت أي خلل تقني أو لديك ملاحظة أو اقتراح، يمكنك التواصل مباشرة مع المطوّر.', telegram: 'تلجرام @Kingoffeeling225', whatsapp: 'التواصل عبر واتساب', footer: 'Osamah Agent\nDeveloped by Osamah Mohammed Ali Saeed Al-Omri' },
 
     control: {
       title: 'مركز التحكم والاتصال',
@@ -434,6 +448,9 @@ const ar = {
       theme: 'المظهر',
       themeValue: 'داكن (Glassmorphism)',
       themeHint: 'ثيم داكن زجاجي ثابت لجميع الشاشات.',
+      lightTheme: 'فاتح مميز',
+      lightThemeHint: 'نصوص داكنة واضحة مع الحفاظ على ألوان العناوين والهوية.',
+      darkTheme: 'داكن زجاجي',
     },
 
     about: {
@@ -464,6 +481,10 @@ const ar = {
       quickCleanHint: 'تفريغ الكاش وملفات الصوت المؤقتة وبيانات الموجز المحفوظة لتسريع التطبيق — تُعاد تلقائياً عند الحاجة',
       quickCleanButton: 'تنظيف الآن',
       quickCleanDoneBody: 'تم تفريغ الملفات المؤقتة بنجاح.',
+      activityLogTitle: 'حذف سجل النشاطات',
+      activityLogHint: 'يحذف سجل البحث والدردشة وصانع الأوامر فقط، دون حذف المحادثات نفسها.',
+      activityLogConfirm: 'هل تريد حذف سجل النشاطات؟ لا يمكن التراجع عن هذا الإجراء.',
+      activityLogDoneBody: 'تم حذف سجل النشاطات.',
       catKnowledge: 'العقل الثاني والمعرفة',
       catKnowledgeHint: 'المحادثات والرسائل ومخزن البرومبت',
       catVideos: 'الفيديوهات المحفوظة',
@@ -526,6 +547,10 @@ const en: typeof ar = {
     connectionConfiguredHint: 'Osamah agent is ready — start a chat now',
     connectionMissing: 'Not connected',
     connectionMissingHint: 'Check your internet connection or pick a model from Control Center',
+    connectionOnline: 'Connected',
+    connectionUnstable: 'Unstable',
+    connectionOffline: 'Disconnected',
+    connectionChecking: 'Checking',
     connectionCta: 'Choose a model',
     recentChats: 'Recent chats',
     noChats: 'No chats yet. Start a new conversation now.',
@@ -555,6 +580,9 @@ const en: typeof ar = {
     liked: 'Liked',
     prompt: 'Prompt',
     error: 'Search failed, try again',
+    googleResults: 'Google results — in-app browser',
+    googleBrowser: 'Google browser inside the app',
+    offlineLocal: 'Offline — local search automatically',
   },
 
   chat: {
@@ -639,6 +667,8 @@ const en: typeof ar = {
     image: 'Image',
     chatHistoryTitle: 'Chat history',
     chatHistoryHint: 'Your chats are stored locally — kept fully separate from files.',
+    activityLogTitle: 'Activity log',
+    activityLogHint: 'Search, chat, prompt, and FLOW activity in one place.',
     viewHistory: 'View history',
     promptMakerTitle: 'Prompt Maker',
     promptMakerHint: 'Build and refine prompts professionally',
@@ -669,6 +699,9 @@ const en: typeof ar = {
     togglePlay: 'Play / pause',
     endOfFeed: 'You reached the end of the feed — tune the keywords for more reels',
   },
+
+  secondBrain: { title: 'Second Brain', subtitle: 'A smart dashboard for your knowledge and activity', personalCenter: 'Personal knowledge center', personalHint: 'Reads what you save locally and gives you a clear usage overview.', chats: 'Chats', messages: 'Messages', prompts: 'Prompt sessions', flow: 'FLOW activity', insight: 'Smart insight', insightText: 'You have {total} local records and {keywords} active interest keywords. Your data stays on this device.', openActivity: 'Open activity log', privacy: 'Second Brain runs locally and keeps its data separate from OpenCode, voice, and FLOW servers.' },
+  activityLog: { title: 'Activity log', subtitle: 'Everything you do in search, chat, prompts, and FLOW', emptyTitle: 'No activity yet', emptyText: 'Your activity will appear here as you use the app.', chat: 'Chat', prompt: 'Prompt Maker session' },
 
   taskType: {
     title: 'Task type',
@@ -857,8 +890,10 @@ const en: typeof ar = {
       chat: { title: 'Chat Settings', subtitle: 'Voice output' },
       appearance: { title: 'Appearance', subtitle: 'Language and interface look' },
       about: { title: 'About', subtitle: 'Identity, version, and developer' },
+      developer: { title: 'Developer', subtitle: 'Osamah Agent, support, and contact' },
       storage: { title: 'Storage Manager', subtitle: 'Clean your data & app space' },
     },
+    developerPage: { back: 'Settings', title: 'Developer — Osamah Agent', name: 'Osamah Mohammed Ali Saeed Al-Omri', supportTitle: 'Support and bug reports', supportText: 'If you find a technical issue or have feedback, contact the developer directly.', telegram: 'Telegram @Kingoffeeling225', whatsapp: 'Contact via WhatsApp', footer: 'Osamah Agent\nDeveloped by Osamah Mohammed Ali Saeed Al-Omri' },
 
     control: {
       title: 'Control & Connection Center',
@@ -926,6 +961,9 @@ const en: typeof ar = {
       theme: 'Theme',
       themeValue: 'Dark (Glassmorphism)',
       themeHint: 'Fixed dark glass theme for all screens.',
+      lightTheme: 'Premium light',
+      lightThemeHint: 'Elegant dark text while preserving brand and heading colors.',
+      darkTheme: 'Dark glass',
     },
 
     about: {
@@ -957,7 +995,11 @@ const en: typeof ar = {
       quickCleanHint:
         'Empties the cache, temporary audio files and cached feed data to speed up the app — they rebuild automatically when needed',
       quickCleanButton: 'Clean now',
-      quickCleanDoneBody: 'Temporary files cleaned successfully.',
+      quickCleanDoneBody: 'Temporary files cleared successfully.',
+      activityLogTitle: 'Delete activity log',
+      activityLogHint: 'Deletes search, chat, and Prompt Maker activity only; conversations remain intact.',
+      activityLogConfirm: 'Delete the activity log? This cannot be undone.',
+      activityLogDoneBody: 'Activity log deleted.',
       catKnowledge: 'Second brain & knowledge',
       catKnowledgeHint: 'Chats, messages and the prompt store',
       catVideos: 'Saved videos',

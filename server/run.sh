@@ -30,6 +30,14 @@ PYTHON="$(pick_python)" || {
 
 cd "$(dirname "$0")"
 
+# Local-only secrets are loaded from the project root when present. This file
+# is ignored by Git and is never bundled into the mobile application.
+if [ -f ../.voice.env ]; then
+  set -a
+  . ../.voice.env
+  set +a
+fi
+
 echo "Osamah voice gateway starting on 0.0.0.0:${VOICE_GATEWAY_PORT:-8100} ..."
 LAN_IP="$(python3 - <<'PY' 2>/dev/null || true
 import socket

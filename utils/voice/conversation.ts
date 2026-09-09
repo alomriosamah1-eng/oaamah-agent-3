@@ -274,16 +274,23 @@ export class Conversation {
       const uris = (
         await this.opts.synthesize(t, this.turnAbort?.signal, this.turnConfig)
       )?.uris;
+      let remotePlayed = false;
       if (uris && uris.length && active()) {
+        remotePlayed = true;
         for (const uri of uris) {
           if (!active()) break;
           try {
             await this.opts.play(uri, this.turnAbort?.signal);
           } catch {
-            // aborted (interrupt) or a playback failure — keep the loop intact
+            // A bad cache URI or native player failure must not make the voice
+            // turn silent. Preserve interruption semantics, but fall back to
+            // the device TTS for ordinary playback failures.
+            remotePlayed = false;
+            break;
           }
         }
-      } else if (active()) {
+      }
+      if (!remotePlayed && active()) {
         await this.opts.speakNative(t, this.turnAbort?.signal, this.turnConfig);
       }
     };

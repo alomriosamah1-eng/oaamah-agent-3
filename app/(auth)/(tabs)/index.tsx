@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -14,6 +14,7 @@ import { VoiceOrb, VoiceOrbState, GalleryOrb, GalleryState, isGalleryStyle, type
 import { loadVoiceConfig } from '@/utils/voice/config';
 import { useVoice } from '@/components/VoiceProvider';
 import { TAB_BAR_HEIGHT } from '@/components/BottomTabBar';
+import { checkServer } from '@/utils/Opencode';
 
 const ORB_STATE: Record<string, VoiceOrbState> = {
   idle: 'idle',
@@ -52,6 +53,20 @@ const Page = () => {
   const insets = useSafeAreaInsets();
   const voice = useVoice();
   const router = useRouter();
+  const [connection, setConnection] = useState<'checking' | 'connected' | 'unstable' | 'offline'>('checking');
+  useEffect(() => {
+    let active = true;
+    const probe = async () => {
+      const started = Date.now(); const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 8000);
+      try { const result = await checkServer(controller.signal); if (!active) return; setConnection(!result.healthy ? 'unstable' : Date.now() - started > 1800 ? 'unstable' : 'connected'); }
+      catch { if (active) setConnection('offline'); } finally { clearTimeout(timer); }
+    };
+    probe(); const interval = setInterval(probe, 15000); return () => { active = false; clearInterval(interval); };
+  }, []);
+  const connectionMeta = {
+    checking: { color: '#F59E0B', label: t('home.connectionChecking') }, connected: { color: '#22C55E', label: t('home.connectionOnline') },
+    unstable: { color: '#F59E0B', label: t('home.connectionUnstable') }, offline: { color: Red, label: t('home.connectionOffline') },
+  }[connection];
 
   const topSafeArea = insets.top > 0 ? insets.top + 4 : 10;
   const bottomClearance = TAB_BAR_HEIGHT + insets.bottom;
@@ -102,7 +117,10 @@ const Page = () => {
       <OsamahHeader />
 
       <DateTimeCard />
-
+      <Pressable onPress={() => router.push('/settings/control')} accessibilityRole="button" accessibilityLabel="{`${t('home.connectionTitle')}: ${connectionMeta.label}`}" style={styles.connectionStatus}>
+        <View style={[styles.connectionOrb, { backgroundColor: withAlpha(connectionMeta.color, 0.18), borderColor: withAlpha(connectionMeta.color, 0.65), shadowColor: connectionMeta.color }]}><View style={[styles.connectionDot, { backgroundColor: connectionMeta.color }]} /></View>
+        <Text style={[styles.connectionLabel, { color: colors.onSurfaceVariant }]}>{connectionMeta.label}</Text>
+      </Pressable>
       <View style={styles.orbZone}>
         <Pressable
           onPress={onOrbPress}
@@ -196,6 +214,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
+  connectionStatus: { alignSelf: 'center', alignItems: 'center', gap: 4, marginTop: 8, zIndex: 5 },
+  connectionOrb: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center', shadowOpacity: 0.5, shadowRadius: 9, elevation: 4 },
+  connectionDot: { width: 13, height: 13, borderRadius: 7 },
+  connectionLabel: { ...(typography.labelSmall as any), fontSize: 10, fontWeight: '700' as any },
   orbPress: {
     alignItems: 'center',
     justifyContent: 'center',

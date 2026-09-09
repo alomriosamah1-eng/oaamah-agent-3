@@ -65,7 +65,7 @@ const Page = () => {
       title={t('settings.chatSettings.title')}
       subtitle={t('settings.chatSettings.subtitle')}
       onBack={() => router.back()}>
-      <View style={[s.tile, { borderColor: withAlpha(ElectricBlue, 0.35) }]}>
+      <View style={[s.tile, { backgroundColor: colors.surfaceVariant, borderColor: withAlpha(ElectricBlue, 0.35) }]}>
         <View style={[s.iconWrap, { backgroundColor: withAlpha(ElectricBlue, 0.16) }]}>
           <MaterialIcons name="record-voice-over" size={22} color={ElectricBlue} />
         </View>
@@ -88,10 +88,10 @@ const Page = () => {
 
       <Spacer h={12} />
 
-      <Text style={[s.hint, { lineHeight: 18 }]}>
+      <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 18 }]}>
         {t('settings.chatSettings.voiceLabel')}
       </Text>
-      <View style={[s.tile, { borderColor: withAlpha(CyanNeon, 0.25) }]}>
+      <View style={[s.tile, { backgroundColor: colors.surfaceVariant, borderColor: withAlpha(CyanNeon, 0.25) }]}>
         <View style={[s.iconWrap, { backgroundColor: withAlpha(CyanNeon, 0.16) }]}>
           <MaterialIcons name="hearing" size={22} color={CyanNeon} />
         </View>
@@ -124,7 +124,7 @@ const Page = () => {
 
       <Spacer h={12} />
 
-      <Text style={[s.hint, { lineHeight: 18 }]}>
+      <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 18 }]}>
         {t('settings.chatSettings.dialectLabel')}
       </Text>
       <View style={[s.tile, { borderColor: withAlpha(CyanNeon, 0.25) }]}>
@@ -155,7 +155,7 @@ const Page = () => {
               </Pressable>
             );
           })}
-          <Text style={[s.hint, { lineHeight: 16 }]}>
+          <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 16 }]}>
             {t('settings.chatSettings.dialectHint')}
           </Text>
         </View>
@@ -163,10 +163,10 @@ const Page = () => {
 
       <Spacer h={12} />
 
-      <Text style={[s.hint, { lineHeight: 18 }]}>
+      <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 18 }]}>
         {t('settings.chatSettings.orbLabel')}
       </Text>
-      <View style={[s.orbPanel, { borderColor: withAlpha(CyanNeon, 0.25) }]}>
+      <View style={[s.orbPanel, { backgroundColor: colors.surfaceVariant, borderColor: withAlpha(CyanNeon, 0.25) }]}>
         <View style={s.orbGrid}>
           {ORB_STYLES.map((o) => {
             const focused = orbStyle === o.id;
@@ -188,7 +188,7 @@ const Page = () => {
                   color={focused ? CyanNeon : withAlpha(colors.onSurfaceVariant, 0.4)}
                   style={s.orbCheck}
                 />
-                <View style={s.orbPreview}>
+                <View style={[s.orbPreview, { backgroundColor: withAlpha(colors.surfaceContainer, 0.9), borderColor: withAlpha(colors.outline, 0.35) }]}>
                   <GalleryOrb
                     style={o.id}
                     size={56}
@@ -223,13 +223,13 @@ const Page = () => {
             );
           })}
         </View>
-        <Text style={[s.hint, { lineHeight: 16 }]}>
+        <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 16 }]}>
           {t('settings.chatSettings.orbHint')}
         </Text>
       </View>
 
       <Spacer h={12} />
-      <Text style={[s.hint, { lineHeight: 18 }]}>
+      <Text style={[s.hint, { color: colors.onSurfaceVariant, lineHeight: 18 }]}>
         {t('appName')} — {t('appSubtitle')}
       </Text>
     </SectionScaffold>
@@ -237,19 +237,17 @@ const Page = () => {
 };
 
 const s = StyleSheet.create({
-  hint: { color: '#9CA3AF', fontSize: 12 },
+  hint: { fontSize: 12 },
   tile: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     borderRadius: 16,
-    backgroundColor: 'rgba(31,41,55,0.5)',
     borderWidth: 1,
     padding: 14,
   },
   orbPanel: {
     borderRadius: 16,
-    backgroundColor: 'rgba(31,41,55,0.5)',
     borderWidth: 1,
     padding: 12,
     gap: 10,
@@ -276,9 +274,7 @@ const s = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(0,0,0,0.35)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
   orbCheck: {

@@ -1,5 +1,6 @@
 // Semantic Material3 color scheme — ported from "osamah agent" (ui/theme/Theme.kt)
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   CyanNeon,
   ElectricBlue,
@@ -12,6 +13,12 @@ import {
   DarkBorder,
   DarkTextPrimary,
   DarkTextSecondary,
+  LightCanvas,
+  LightSurface,
+  LightSurfaceGlass,
+  LightBorder,
+  LightTextPrimary,
+  LightTextSecondary,
   Red,
 } from './colors';
 import { typography } from './typography';
@@ -62,27 +69,63 @@ const darkColorScheme: MaterialColorScheme = {
   onError: '#FFFFFF',
 };
 
+const lightColorScheme: MaterialColorScheme = {
+  primary: CyanNeon,
+  onPrimary: '#001014',
+  primaryContainer: '#D8F8FA',
+  onPrimaryContainer: '#08343A',
+  secondary: DeepViolet,
+  onSecondary: '#FFFFFF',
+  secondaryContainer: '#EDE3FF',
+  onSecondaryContainer: '#32115E',
+  tertiary: EmeraldGlow,
+  onTertiary: '#06251A',
+  background: LightCanvas,
+  onBackground: LightTextPrimary,
+  surface: LightSurface,
+  onSurface: LightTextPrimary,
+  surfaceVariant: LightSurfaceGlass,
+  surfaceContainer: '#EEF2F7',
+  onSurfaceVariant: LightTextSecondary,
+  outline: LightBorder,
+  error: Red,
+  onError: '#FFFFFF',
+};
+
+const THEME_KEY = 'osamah:theme';
+
 export interface Theme {
   colors: MaterialColorScheme;
   typography: typeof typography;
   isDark: boolean;
+  setThemeMode: (mode: 'dark' | 'light') => void;
 }
 
 const ThemeContext = createContext<Theme>({
   colors: darkColorScheme,
   typography,
   isDark: true,
+  setThemeMode: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // التصميم "Futuristic Glassmorphism" داكن بطبيعته، فنثبّت الثيم الداكن دائماً.
+  const [mode, setMode] = useState<'dark' | 'light'>('dark');
+  useEffect(() => {
+    AsyncStorage.getItem(THEME_KEY).then((stored) => {
+      if (stored === 'light' || stored === 'dark') setMode(stored);
+    }).catch(() => {});
+  }, []);
   const theme = useMemo<Theme>(
     () => ({
-      colors: darkColorScheme,
+      colors: mode === 'light' ? lightColorScheme : darkColorScheme,
       typography,
-      isDark: true,
+      isDark: mode === 'dark',
+      setThemeMode: (next) => {
+        setMode(next);
+        AsyncStorage.setItem(THEME_KEY, next).catch(() => {});
+      },
     }),
-    []
+    [mode]
   );
   return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
 }

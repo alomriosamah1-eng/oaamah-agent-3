@@ -26,8 +26,11 @@ import { useI18n } from '@/i18n/provider';
 import { searchLocalContent, type SearchHit } from '@/utils/search/searchLocal';
 import { searchShorts, type FlowVideo } from '@/utils/flow/youtubeClient';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
+import { addActivity } from '@/utils/activityLog';
+import { useOnline } from '@/utils/flow/net';
 
-type Mode = 'local' | 'flow';
+type Mode = 'web' | 'flow';
 
 function fmtDuration(sec: number): string {
   const s = sec || 0;
@@ -135,7 +138,8 @@ export function SearchScreen() {
   const db = useSQLiteContext();
 
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState<Mode>('local');
+  const [mode, setMode] = useState<Mode>('web');
+  const { online } = useOnline();
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [reels, setReels] = useState<FlowVideo[]>([]);
   const [searching, setSearching] = useState(false);
@@ -151,13 +155,14 @@ export function SearchScreen() {
       try {
         const results = await searchLocalContent(db, q);
         setHits(results);
+        void addActivity({ source: 'search', title: q, detail: t('search.local'), });
       } catch {
         setHits([]);
       } finally {
         setSearching(false);
       }
     },
-    [db]
+    [db, t]
   );
 
   const runOnline = useCallback(
@@ -167,6 +172,7 @@ export function SearchScreen() {
       try {
         const page = await searchShorts(q, lang);
         setReels(page.items);
+        void addActivity({ source: 'search', title: q, detail: t('search.flowOnline') });
         if (page.items.length === 0) setError(true);
       } catch {
         setReels([]);
@@ -175,14 +181,16 @@ export function SearchScreen() {
         setSearching(false);
       }
     },
-    [lang]
+    [lang, t]
   );
 
   const toggleMode = () => {
-    const next: Mode = mode === 'local' ? 'flow' : 'local';
+    const next: Mode = mode === 'web' ? 'flow' : 'web';
     setMode(next);
+    if (next === 'web' && query.trim()) void addActivity({ source: 'search', title: query.trim(), detail: t('search.googleBrowser') });
     if (query.trim()) {
       if (next === 'flow') runOnline(query.trim());
+      else if (online) setSearching(false);
       else runLocal(query.trim());
     }
   };
@@ -197,6 +205,11 @@ export function SearchScreen() {
       setError(false);
       return;
     }
+    if (mode === 'web' && online) {
+      setSearching(false);
+      setError(false);
+      return;
+    }
     setSearching(true);
     timerRef.current = setTimeout(() => {
       if (mode === 'flow') runOnline(q);
@@ -206,7 +219,7 @@ export function SearchScreen() {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, mode]);
+  }, [query, mode, online]);
 
   const openVideo = (v: { ytId: string; title: string; channel?: string; thumb?: string; duration?: number }) => {
     router.push({
@@ -230,7 +243,8 @@ export function SearchScreen() {
   const prompts = hits.filter((h) => h.type === 'prompt');
   const hasLocalResults = hits.length > 0;
   const empty = query.trim().length === 0;
-  const noResults = !empty && !searching && !error && (mode === 'local' ? !hasLocalResults : reels.length === 0);
+  const usingLocalFallback = mode === 'web' && !online;
+  const noResults = !empty && !searching && !error && (usingLocalFallback ? !hasLocalResults : mode === 'flow' ? reels.length === 0 : false);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background, paddingTop: topSafeArea }]}>
@@ -253,7 +267,7 @@ export function SearchScreen() {
 
       {/* Search bar + FLOW online toggle at the end of the bar */}
       <View style={styles.searchRow}>
-        <View style={[styles.inputShell, { borderColor: withAlpha(mode === 'flow' ? CyanNeon : colors.outline, 0.4) }]}>
+        <View style={[styles.inputShell, { backgroundColor: colors.surface, borderColor: withAlpha(mode === 'flow' ? CyanNeon : Sky, 0.4) }]}>
           <MaterialIcons name="search" size={20} color={CyanNeon} />
           <TextInput
             value={query}
@@ -275,14 +289,14 @@ export function SearchScreen() {
           style={({ pressed }) => [
             styles.flowBtn,
             {
-              borderColor: withAlpha(mode === 'flow' ? CyanNeon : MagentaGlow, 0.4),
-              backgroundColor: mode === 'flow' ? withAlpha(CyanNeon, 0.14) : withAlpha(colors.surfaceVariant, 0.45),
+              borderColor: withAlpha(mode === 'flow' ? CyanNeon : Sky, 0.4),
+              backgroundColor: mode === 'flow' ? withAlpha(CyanNeon, 0.14) : withAlpha(Sky, 0.12),
             },
             pressed && { opacity: 0.75 },
           ]}>
-          <MaterialIcons name={mode === 'flow' ? 'play-circle' : 'movie-filter'} size={18} color={mode === 'flow' ? CyanNeon : MagentaGlow} />
-          <Text style={{ color: mode === 'flow' ? CyanNeon : MagentaGlow, fontSize: 11, fontWeight: FontWeights.bold }}>
-            FLOW
+          <MaterialIcons name={mode === 'flow' ? 'play-circle' : 'language'} size={18} color={mode === 'flow' ? CyanNeon : Sky} />
+          <Text style={{ color: mode === 'flow' ? CyanNeon : Sky, fontSize: 11, fontWeight: FontWeights.bold }}>
+            {mode === 'flow' ? 'FLOW' : 'WEB'}
           </Text>
         </Pressable>
       </View>
@@ -291,7 +305,7 @@ export function SearchScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingBottom: 8 }}>
         <View style={[styles.dot, { backgroundColor: mode === 'flow' ? CyanNeon : Sky }]} />
         <Text style={{ color: colors.onSurfaceVariant, fontSize: 12 }}>
-          {mode === 'flow' ? t('search.flowOnline') : t('search.local')}
+          {mode === 'flow' ? t('search.flowOnline') : online ? t('search.googleBrowser') : t('search.offlineLocal')}
         </Text>
       </View>
 
@@ -326,6 +340,15 @@ export function SearchScreen() {
           <Text style={{ color: colors.onSurfaceVariant, ...(typography.bodySmall as any), textAlign: 'center', paddingHorizontal: 28 }}>
             {t('search.noResultsHint')}
           </Text>
+        </View>
+      ) : mode === 'web' && online ? (
+        <View style={styles.browserWrap}>
+          <View style={styles.browserBar}>
+            <MaterialIcons name="language" size={16} color={Sky} />
+            <Text style={{ color: colors.onSurfaceVariant, fontSize: 12, flex: 1 }} numberOfLines={1}>{t('search.googleResults')}</Text>
+            <MaterialIcons name="open-in-new" size={16} color={colors.onSurfaceVariant} />
+          </View>
+          <WebView source={{ uri: `https://www.google.com/search?igu=1&q=${encodeURIComponent(query.trim())}` }} style={styles.browser} startInLoadingState javaScriptEnabled domStorageEnabled allowsBackForwardNavigationGestures setSupportMultipleWindows={false} />
         </View>
       ) : (
         <FlatList
@@ -442,6 +465,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   dot: { width: 6, height: 6, borderRadius: 3 },
+  browserWrap: { flex: 1, marginHorizontal: 12, marginTop: 4, overflow: 'hidden', borderRadius: 16 },
+  browserBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  browser: { flex: 1, minHeight: 420, backgroundColor: '#fff' },
   centerState: {
     alignItems: 'center',
     justifyContent: 'center',

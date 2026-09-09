@@ -18,6 +18,7 @@ import { SectionScaffold } from '@/components/SectionScaffold';
 import { StorageDonut, CATEGORY_COLORS } from '@/components/StorageDonut';
 import { useI18n, TKey } from '@/i18n/provider';
 import { useSQLiteContext } from 'expo-sqlite';
+import { clearActivities } from '@/utils/activityLog';
 import {
   bytesLabel,
   cleanTemp,
@@ -109,6 +110,26 @@ const Page = () => {
 
   const quickClean = () =>
     runPlan('temp', () => cleanTemp(db), ['cache'], t('settings.storage.quickCleanDoneBody'));
+
+  const deleteActivityLog = () => {
+    if (busy) return;
+    Alert.alert(t('settings.storage.activityLogTitle'), t('settings.storage.activityLogConfirm'), [
+      { text: t('chat.cancel'), style: 'cancel' },
+      {
+        text: t('settings.storage.deleteLabel'),
+        style: 'destructive',
+        onPress: async () => {
+          setBusy('activity');
+          try {
+            await clearActivities();
+            Alert.alert(t('settings.storage.done'), t('settings.storage.activityLogDoneBody'));
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  };
 
   const proxy = (fn: (db: any) => Promise<unknown>) => () => fn(db);
   const removeProfile = proxy(clearProfileData);
@@ -204,6 +225,20 @@ const Page = () => {
             </Pressable>
           </View>
 
+          <Spacer h={12} />
+          <Pressable
+            disabled={busyNow}
+            onPress={deleteActivityLog}
+            style={({ pressed }) => [s.activityDelete, { borderColor: withAlpha(Red, 0.35), backgroundColor: withAlpha(Red, 0.08), opacity: busyNow ? 0.6 : pressed ? 0.75 : 1 }]}
+          >
+            {busy === 'activity' ? <ActivityIndicator size="small" color={Red} /> : <MaterialIcons name="history" size={20} color={Red} />}
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.onSurface, ...(typography.titleSmall as any), fontWeight: FontWeights.bold }}>{t('settings.storage.activityLogTitle')}</Text>
+              <Text style={{ color: colors.onSurfaceVariant, ...(typography.bodySmall as any) }}>{t('settings.storage.activityLogHint')}</Text>
+            </View>
+            <MaterialIcons name="delete-outline" size={21} color={Red} />
+          </Pressable>
+
           <Spacer h={24} />
           <Text style={{ color: colors.onSurface, ...(typography.titleMedium as any), fontWeight: FontWeights.bold }}>
             {t('settings.storage.destructiveTitle')}
@@ -213,7 +248,7 @@ const Page = () => {
 
           <View style={{ gap: 10 }}>
             {resetRows.map((row) => (
-              <Pressable key={row.id} disabled={busyNow} onPress={row.run} style={({ pressed }) => [s.row, { opacity: busyNow ? 0.6 : pressed ? 0.75 : 1 }]}>
+              <Pressable key={row.id} disabled={busyNow} onPress={row.run} style={({ pressed }) => [s.row, { backgroundColor: colors.surfaceVariant, borderColor: colors.outline, opacity: busyNow ? 0.6 : pressed ? 0.75 : 1 }]}>
                 <View style={[s.rowIcon, { backgroundColor: withAlpha(row.id === 'profile' ? Red : CATEGORY_COLORS[row.id], 0.14) }]}>
                   <MaterialIcons name={row.icon} size={20} color={CATEGORY_COLORS[row.id]} />
                 </View>
@@ -294,14 +329,13 @@ const s = StyleSheet.create({
     paddingVertical: 10,
   },
   quickBtnText: { ...(typography.labelLarge as any), fontWeight: FontWeights.bold },
+  activityDelete: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, borderWidth: 1, padding: 13 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(31,41,55,0.5)',
     padding: 12,
   },
   rowIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },

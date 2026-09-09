@@ -25,6 +25,10 @@ const getServerUrl = async (): Promise<string | null> => {
 const serverCandidates = async (): Promise<string[]> => {
   const stored = await getServerUrl();
   const list: Array<string> = [];
+  const publicServer = (process.env.EXPO_PUBLIC_OPENCODE_URL ?? '').trim().replace(/\/+$/, '');
+  if (publicServer) list.push(publicServer);
+  // A newly supplied Expo URL must win over a stale persisted tunnel URL.
+  // The stored override remains a fallback for offline/local configurations.
   if (stored) list.push(stored);
   // Metro host: "192.168.1.50:8081" → "http://192.168.1.50:4096". Expo Go
   // reliably exposes it as `expoConfig.hostUri`; `expoGoConfig.debuggerHost`
