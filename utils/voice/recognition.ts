@@ -11,7 +11,7 @@
 // the desktop never used one, so neither do we.
 
 import { setAudioModeAsync } from 'expo-audio';
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { sttRouter } from './providers/sttRouter';
 
 export interface RecognitionCallbacks {
@@ -110,6 +110,7 @@ export function createRecognizer(): Recognizer {
   let recorder: any = null;
   let locals: null | { locale: string; callbacks: RecognitionCallbacks } = null;
   let vadTimer: ReturnType<typeof setInterval> | null = null;
+  let nativeListening = false;
 
   function teardown() {
     if (vadTimer) {
@@ -157,10 +158,25 @@ export function createRecognizer(): Recognizer {
 
   return {
     async isRecognizing() {
-      return Boolean(recorder?.isRecording);
+      return nativeListening || Boolean(recorder?.isRecording);
     },
 
     async start(locale, callbacks) {
+      if (Platform.OS === 'android' && NativeModules.EmbeddedSpeech?.recognize) {
+        locals = { locale, callbacks };
+        nativeListening = true;
+        try {
+          const text = await NativeModules.EmbeddedSpeech.recognize(locale);
+          nativeListening = false;
+          locals = null;
+          callbacks.onFinal(String(text ?? '').trim());
+        } catch (err) {
+          nativeListening = false;
+          locals = null;
+          callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+        }
+        return;
+      }
       try {
         await startInner(locale, callbacks);
       } catch (err) {
@@ -171,6 +187,12 @@ export function createRecognizer(): Recognizer {
     },
 
     async stop() {
+      if (nativeListening) {
+        await NativeModules.EmbeddedSpeech?.cancel?.().catch(() => {});
+        nativeListening = false;
+        locals = null;
+        return;
+      }
       const session = locals;
       const rec = teardown();
       if (!rec || !session) return;
@@ -178,6 +200,12 @@ export function createRecognizer(): Recognizer {
     },
 
     async cancel() {
+      if (nativeListening) {
+        await NativeModules.EmbeddedSpeech?.cancel?.().catch(() => {});
+        nativeListening = false;
+        locals = null;
+        return;
+      }
       const rec = teardown();
       if (rec) {
         await rec.stop().catch(() => {});

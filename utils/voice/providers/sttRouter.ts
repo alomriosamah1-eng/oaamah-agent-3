@@ -14,6 +14,7 @@
 import { gatewayTranscribe, isVoiceGatewayConfigured } from './gateway';
 import { acquireVoiceKey, releaseVoiceKey, getVoiceKeyEntries, voiceProviderOrder } from '@/utils/voice/vkeys';
 import { voiceLog } from '../log';
+import { NativeModules, Platform } from 'react-native';
 
 const GOOGLE_STT_BASE = 'https://speech.googleapis.com/v1';
 
@@ -79,6 +80,9 @@ export async function sttRouter(
   locale: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  if (Platform.OS === 'android' && NativeModules.EmbeddedSpeech?.recognize) {
+    return NativeModules.EmbeddedSpeech.recognize(locale);
+  }
   const gatewayAvailable = isVoiceGatewayConfigured();
   const keys = await getVoiceKeyEntries('stt');
   const order = voiceProviderOrder('stt', gatewayAvailable, keys.length);

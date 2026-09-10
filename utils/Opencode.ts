@@ -25,7 +25,10 @@ const getServerUrl = async (): Promise<string | null> => {
 const serverCandidates = async (): Promise<string[]> => {
   const stored = await getServerUrl();
   const list: Array<string> = [];
-  const publicServer = (process.env.EXPO_PUBLIC_OPENCODE_URL ?? '').trim().replace(/\/+$/, '');
+  // Native release owns this endpoint; never let a stale saved URL mask it.
+  list.push('http://127.0.0.1:4096');
+  const extra = Constants.expoConfig?.extra as { opencodeUrl?: string } | undefined;
+  const publicServer = (process.env.EXPO_PUBLIC_OPENCODE_URL ?? extra?.opencodeUrl ?? '').trim().replace(/\/+$/, '');
   if (publicServer) list.push(publicServer);
   // A newly supplied Expo URL must win over a stale persisted tunnel URL.
   // The stored override remains a fallback for offline/local configurations.

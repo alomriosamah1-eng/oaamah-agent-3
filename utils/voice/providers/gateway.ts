@@ -14,6 +14,7 @@
 // functional offline, just with a more limited voice set.
 
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 /**
  * Resolve the voice gateway endpoint. Priority:
@@ -32,6 +33,9 @@ import Constants from 'expo-constants';
 export function voiceGatewayUrl(): string {
   const fromEnv = (process.env.EXPO_PUBLIC_VOICE_GATEWAY_URL ?? '').trim();
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
+  // Native builds expose the embedded Android voice bridge through the same
+  // local process as the embedded OpenCode server.
+  if (Platform.OS === 'android') return 'http://127.0.0.1:4096';
   // Metro host: "192.168.1.50:8081" → "http://192.168.1.50:8100". Expo Go
   // reliably exposes it as `expoConfig.hostUri`; `expoGoConfig.debuggerHost`
   // is the classic fallback for older manifests.
@@ -41,11 +45,15 @@ export function voiceGatewayUrl(): string {
   const host = hostUri.split(':')[0];
   if (host) return `http://${host}:8100`;
   const extra = Constants.expoConfig?.extra as { voiceGatewayUrl?: string } | undefined;
-  return (extra?.voiceGatewayUrl ?? '').trim().replace(/\/+$/, '');
+  const baked = (extra?.voiceGatewayUrl ?? '').trim().replace(/\/+$/, '');
+  // Release builds have no Metro host. OpenCode advertises opencode.local via
+  // mDNS, and the bundled voice gateway is intended to run on that same host.
+  // Keep the baked URL first when supplied, then use the documented mDNS name.
+  return baked || 'http://opencode.local:8100';
 }
 
 export function isVoiceGatewayConfigured(): boolean {
-  return voiceGatewayUrl().length > 0;
+  return Platform.OS !== 'android' && voiceGatewayUrl().length > 0;
 }
 
 export interface GatewayTtsPayload {
@@ -104,13 +112,17 @@ export async function gatewayTts(
 export async function gatewayStatus(): Promise<boolean> {
   const gateway = voiceGatewayUrl();
   if (!gateway) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(`${gateway}/voice/status`);
+    const res = await fetch(`${gateway}/voice/status`, { signal: controller.signal });
     if (!res.ok) return false;
     const data: any = await res.json().catch(() => ({}));
     return data?.ok === true;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

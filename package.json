@@ -11,8 +11,8 @@
     "test": "tsc -p tsconfig.test.json && node .test-dist/tests/runner.js",
     "api:refresh": "node scripts/api-refresh.js",
     "prebuild": "expo prebuild",
-    "server": "./opencode serve --hostname 0.0.0.0 --port 4096 --mdns",
-    "server:local": "./opencode serve --hostname 127.0.0.1 --port 4096"
+    "server": "opencode serve --hostname 0.0.0.0 --port 4096 --mdns",
+    "server:local": "opencode serve --hostname 127.0.0.1 --port 4096"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",

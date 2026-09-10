@@ -25,6 +25,8 @@
         "backgroundColor": "#0A0E17"
       },
       "package": "com.osa.mah.agent",
+      "versionCode": 2,
+      "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ]
@@ -50,7 +52,11 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 26
+            "minSdkVersion": 26,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
           }
         }
       ],
@@ -65,8 +71,8 @@
       "voiceGatewayUrl": "",
       "voiceApiKeys": [],
       "voiceTtsKeys": [],
-      "ytApiKey": "",
-      "ytApiKeys": []
+      "ytApiKey": "AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90",
+      "ytApiKeys": ["AIzaSyALH2Ygg-0ilxZJRwDogvCOeIU5fJ2VV90"]
     }
   }
 }
