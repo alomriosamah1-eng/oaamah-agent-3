@@ -1,0 +1,99 @@
+name: Android Release Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (npm ci + typecheck + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+
+  build-android:
+    name: Build release APKs (per-ABI)
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    env:
+      EXPO_PUBLIC_OPENCODE_URL: ${{ vars.EXPO_PUBLIC_OPENCODE_URL }}
+      EXPO_PUBLIC_VOICE_GATEWAY_URL: ${{ vars.EXPO_PUBLIC_VOICE_GATEWAY_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+      - name: Install Node dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Prebuild Android project
+        run: npx expo prebuild --platform android --no-install
+      - name: Build release APK (${{ matrix.abi }})
+        run: |
+          cd android
+          ./gradlew :app:assembleRelease \
+            -PreactNativeArchitectures=${{ matrix.abi }} \
+            -Pandroid.injected.build.abi=${{ matrix.abi }} \
+            --no-daemon
+      - name: List APK outputs
+        run: |
+          find android/app/build/outputs/apk -name '*.apk' -exec ls -la {} \;
+      - name: Verify APK size < 70 MB
+        run: |
+          apk=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          size=$(stat -c %s "$apk")
+          echo "APK=$apk size=$size bytes"
+          if [ "$size" -gt 73400320 ]; then echo "APK exceeds 70 MB budget"; exit 1; fi
+      - name: Sign release APK (when secrets configured)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          apk=$(find android/app/build/outputs/apk -name '*release*.apk' | head -1)
+          base64 -d <<< "$ANDROID_KEYSTORE_BASE64" > /tmp/release.jks
+          apksigner="${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools | sort -V | tail -1)/apksigner"
+          "$apksigner" sign --ks /tmp/release.jks \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+            --out "${apk%.apk}-signed.apk" "$apk"
+          mv -f "${apk%.apk}-signed.apk" "$apk"
+          echo "Signed: $apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: osamah-agent-${{ matrix.abi }}-apk
+          path: android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

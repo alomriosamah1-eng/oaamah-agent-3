@@ -187,7 +187,7 @@ const ar = {
     endOfFeed: 'وصلت إلى نهاية الخلاصة — عدّل كلماتك لمزيد من الريلز',
   },
 
-  secondBrain: { title: 'العقل الثاني', subtitle: 'لوحة ذكية تجمع معرفتك ونشاطك في مكان واحد', personalCenter: 'مركز المعرفة الشخصي', personalHint: 'يقرأ ما تحفظه محلياً ويمنحك صورة واضحة عن استخدامك.', chats: 'المحادثات', messages: 'الرسائل', prompts: 'جلسات البرومبت', flow: 'نشاطات FLOW', insight: 'ملخص ذكي', insightText: 'لديك {total} سجلاً محلياً و{keywords} كلمة اهتمام نشطة. بياناتك تبقى على الجهاز.', openActivity: 'فتح سجل النشاطات', privacy: 'العقل الثاني يعمل محلياً، ولا يخلط بياناته مع خوادم OpenCode أو خادم الصوت أو FLOW.' },
+  secondBrain: { title: 'العقل الثاني', subtitle: 'لوحة ذكية تجمع معرفتك ونشاطك في مكان واحد', personalCenter: 'مركز المعرفة الشخصي', personalHint: 'يقرأ ما تحفظه محلياً ويمنحك صورة واضحة عن استخدامك.', chats: 'المحادثات', messages: 'الرسائل', prompts: 'جلسات البرومبت', flow: 'نشاطات FLOW', insight: 'ملخص ذكي', insightText: 'لديك {total} سجلاً محلياً و{keywords} كلمة اهتمام نشطة. بياناتك تبقى على الجهاز.', openActivity: 'فتح سجل النشاطات', privacy: 'العقل الثاني يعمل محلياً، ولا يخلط بياناته مع خادم المحادثة أو خادم الصوت أو FLOW.' },
   activityLog: { title: 'سجل النشاطات', subtitle: 'كل ما أنجزته في البحث والدردشة والبرومبتات وFLOW', emptyTitle: 'لا توجد نشاطات بعد', emptyText: 'ستظهر هنا سجلاتك تلقائياً عند استخدام أقسام التطبيق.', chat: 'محادثة', prompt: 'جلسة صانع الأوامر' },
 
   taskType: {
@@ -700,7 +700,7 @@ const en: typeof ar = {
     endOfFeed: 'You reached the end of the feed — tune the keywords for more reels',
   },
 
-  secondBrain: { title: 'Second Brain', subtitle: 'A smart dashboard for your knowledge and activity', personalCenter: 'Personal knowledge center', personalHint: 'Reads what you save locally and gives you a clear usage overview.', chats: 'Chats', messages: 'Messages', prompts: 'Prompt sessions', flow: 'FLOW activity', insight: 'Smart insight', insightText: 'You have {total} local records and {keywords} active interest keywords. Your data stays on this device.', openActivity: 'Open activity log', privacy: 'Second Brain runs locally and keeps its data separate from OpenCode, voice, and FLOW servers.' },
+  secondBrain: { title: 'Second Brain', subtitle: 'A smart dashboard for your knowledge and activity', personalCenter: 'Personal knowledge center', personalHint: 'Reads what you save locally and gives you a clear usage overview.', chats: 'Chats', messages: 'Messages', prompts: 'Prompt sessions', flow: 'FLOW activity', insight: 'Smart insight', insightText: 'You have {total} local records and {keywords} active interest keywords. Your data stays on this device.', openActivity: 'Open activity log', privacy: 'Second Brain runs locally and keeps its data separate from the chat, voice, and FLOW services.' },
   activityLog: { title: 'Activity log', subtitle: 'Everything you do in search, chat, prompts, and FLOW', emptyTitle: 'No activity yet', emptyText: 'Your activity will appear here as you use the app.', chat: 'Chat', prompt: 'Prompt Maker session' },
 
   taskType: {

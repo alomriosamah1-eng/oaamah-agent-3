@@ -88,10 +88,9 @@ function useServerFirst(args: { serverFirst?: boolean }): boolean {
  * are skipped after burning their quota and the engine falls through.
  */
 const DEFAULT_MODEL_CHAIN = [
-  'ling-3.0-flash-fin-free',
-  'laguna-s-2.1-free',
-  'deepseek-v4-flash-free',
   'big-pickle',
+  'ling-3.0-flash-fin-free',
+  'deepseek-v4-flash-free',
   'muse-spark-1.3-contributor-free',
 ];
 

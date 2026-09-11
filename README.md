@@ -24,6 +24,20 @@ Everything you need to run it on any other machine is in this repository: the ap
 
 ---
 
+## Architecture note (verified 2026-09-11)
+
+The app's chat engine is the **OpenCode Zen gateway** (`https://opencode.ai/zen/v1`),
+reached through a small on-device HTTP transport (`native/android/com/osa/mah/agent/EmbeddedOpenCodeServer.kt`)
+on `127.0.0.1:4096`. That transport *proxies* the Zen API (live model catalog +
+streamed chat) and is **not** a bundled model or the opencode binary (no Android
+build of the opencode binary exists). When a real `opencode serve` runs on the
+same LAN it is preferred automatically (`opencode.local` / `EXPO_PUBLIC_OPENCODE_URL`).
+
+Voice input on Android uses the native speech recognizer; voice output uses the
+native speech fallback; the Python gateway (`server/voice_gateway.py`, port 8100)
+serves Expo Go / LAN development. CI builds per-ABI release APKs via
+`.github/workflows/android-release.yml`.
+
 ## Repository layout
 
 ```

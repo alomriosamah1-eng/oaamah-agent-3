@@ -152,7 +152,7 @@ const Page = () => {
             <View style={{ flex: 1 }}>
               <Text style={[s.modelName, { color: colors.onSurface }]} numberOfLines={1}>{m.id}</Text>
               <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>
-                {m.ownedBy ?? t('appName')} · free
+                {t('appName')} · free
               </Text>
             </View>
             <MaterialIcons
@@ -172,7 +172,7 @@ const Page = () => {
             <View style={{ flex: 1 }}>
               <Text style={[s.modelName, { color: colors.onSurface }]} numberOfLines={1}>{m.id}</Text>
               <Text style={[s.modelMeta, { color: colors.onSurfaceVariant }]}>
-                {m.ownedBy ?? t('appName')}
+                {t('appName')}
               </Text>
             </View>
             <MaterialIcons
